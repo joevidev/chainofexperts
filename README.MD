@@ -27,3 +27,10 @@ CoMoE/
             config.json
             ...
 ```
+
+
+## Configuration
+
+The r1-hf configuration is directly borrowed from the DeepSeek-R1 repository.
+
+for r1-tiny-hf, we compared the difference between deepseek-v2 and deepseek-v2-lite, summarized their trends, and applied a similar configuration from r1-hf to r1-tiny-hf.
