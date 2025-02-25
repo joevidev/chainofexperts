@@ -15,22 +15,79 @@ To control whether experts communicate, We will implement a switch within the mo
 
 The final deliverable for this project will be a simple, well-documented code repository implementation, including instructions on running the experiment. The results will be presented in a structured format, allowing for further analysis and discussion.
 
-## Project Structure
-
-```
-CoMoE/
-    config/
-        r1-tiny-hf/
-            config.json
-            ...
-        r1-hf/
-            config.json
-            ...
-```
-
 
 ## Configuration
 
 The r1-hf configuration is directly borrowed from the DeepSeek-R1 repository.
 
-for r1-tiny-hf, we compared the difference between deepseek-v2 and deepseek-v2-lite, summarized their trends, and applied a similar configuration from r1-hf to r1-tiny-hf.
+For r1-lite-hf and r1-tiny-hf, we compared the difference between deepseek-v2 and deepseek-v2-lite, summarized their trends, and applied a similar configuration from r1-hf to r1-lite-hf and to r1-tiny-hf.
+
+### Scaling Analysis: DeepSeek-V2 vs V2-Lite
+
+#### Core Model Dimensions
+- **Hidden size**: 60% reduction (5120 → 2048)
+- **Layer count**: 55% reduction (60 → 27)
+- **Attention heads**: 87.5% reduction (128 → 16)
+
+#### MoE Architecture Scaling
+- **Expert count**: 60% reduction (160 → 64)
+- **Group structure**: Simplified from 8 groups to 1
+- **Routing complexity**: Reduced from `group_limited_greedy` to `greedy`
+- **Routing scaling factor**: Decreased from 16.0 to 1.0
+
+#### Feed-Forward Network
+- **FFN ratio**: Increased in smaller model (2.4× → 5.3×)
+- **MoE intermediate size**: Proportionally reduced
+
+### Applied DownScaling: R1 to R1-Lite (Around 30B Parameters)
+
+Using the observed scaling patterns, we transformed the r1-hf configuration to r1-lite-hf by:
+
+1. **Balanced dimension reduction**:
+   - Hidden size: 7168 → 2816 (~60% reduction)
+   - Layers: 61 → 28 (~55% reduction)
+   - Attention heads: 128 → 16 (following V2-Lite pattern)
+
+2. **MoE architecture simplification**:
+   - Experts: 256 → 96 (proportional reduction)
+   - Groups: 8 → 1 (matching V2-Lite simplification)
+   - Routing method: `noaux_tc` → `greedy` (following scaling trend)
+   - Topk_group: 4 → 1 (simplification)
+
+3. **FFN scaling**:
+   - Maintained higher FFN-to-hidden ratio in the smaller model
+   - Intermediate size: 18432 → 15232
+   - MoE intermediate: 2048 → 1792
+
+4. **Preserved architectural elements**:
+   - Maintained experts-per-token count (8)
+   - Preserved attention head dimensions
+   - Retained R1-specific parameters like quantization config
+
+
+
+### Further DownScaling to R1-Tiny (800M Parameters)
+
+For r1-tiny-hf (800M scale), we've applied more aggressive scaling than the v2-lite pattern to create a truly lightweight model suitable for resource-constrained environments. To scale down the R1 model from ~32B to ~800M parameters, we need to apply substantially more aggressive scaling than the V2 to V2-Lite transition.
+
+## Scaling Rationale
+
+1. **Core Dimensions**:
+   - **Hidden size**: 7168 → 1024 (~86% reduction)
+   - **Layer count**: 61 → 16 (~74% reduction)
+   - **Attention heads**: 128 → 16 (~88% reduction)
+
+2. **MoE Architecture**:
+   - **Expert count**: 256 → 16 (~94% reduction)
+   - **Experts per token**: 8 → 4 (reduced for efficiency)
+   - **Architecture simplification**: Maintained the simpler routing approach
+
+3. **Head Dimensions**:
+   - Reduced head dimensions from 128 to 64 for efficiency
+   - Maintained equal RoPE and NoRoPE dimensions
+
+4. **Other Optimizations**:
+   - **Preserved critical features**: Kept important architectural elements like RoPE scaling
+
+
+We follow the empirical scaling patterns observed in DeepSeek's V2 series while respecting the unique architectural elements of the R1 model.
