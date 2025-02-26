@@ -2,6 +2,11 @@ model:
   config_path: "config/comoe-tiny-hf"
   trust_remote_code: true
   output_dir: "./comoe_pretrained"
+  config:
+    use_expert_communication: true
+    expert_communication_type: "default"
+
+
 
 tokenizer:
   path: "config/r1-tokenizer-hf"
@@ -44,8 +49,11 @@ scheduler:
   warmup_steps: 500
 
 evaluation:
-  do_eval: false
-  eval_steps: 1000
+  do_eval: true
+  eval_steps: 100
+  val_size: 512
+  per_device_eval_batch_size: 8
+  load_best_model_at_end: true
 
 checkpointing:
   save_total_limit: 3

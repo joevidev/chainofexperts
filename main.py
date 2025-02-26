@@ -14,6 +14,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
     parser.add_argument("--epochs", type=int, default=None, help="Training epochs")
     parser.add_argument("--fp16", action="store_true", default=None, help="Use fp16")
+    parser.add_argument("--val_size", type=int, default=None, help="Validation dataset size")
     return parser.parse_args()
 
 def main():
@@ -29,10 +30,15 @@ def main():
     if args.lr: config['training']['learning_rate'] = args.lr
     if args.epochs: config['training']['num_train_epochs'] = args.epochs
     if args.fp16 is not None: config['training']['fp16'] = args.fp16
+    if args.val_size: config['evaluation']['val_size'] = args.val_size
     
     # Create model, tokenizer
     model_config = AutoConfig.from_pretrained(config['model']['config_path'], 
                                              trust_remote_code=config['model']['trust_remote_code'])
+    # override config
+    model_config.use_expert_communication = config['model']['config']['use_expert_communication']
+    model_config.expert_communication_type = config['model']['config']['expert_communication_type']
+
     model = AutoModelForCausalLM.from_config(model_config, 
                                             trust_remote_code=config['model']['trust_remote_code'])
     if config['training']['gradient_checkpointing']:
@@ -42,9 +48,28 @@ def main():
 
     
     # Load and process dataset
-    dataset = load_dataset(config['data']['name'], config['data']['config'], split=config['data']['split'])
+    full_dataset = load_dataset(config['data']['name'], config['data']['config'])
+    
+    # Split into train and validation
+    train_dataset = full_dataset[config['data']['split']]
+    if 'validation' in full_dataset:
+        val_dataset = full_dataset['validation']
+    else:
+        # If no validation split exists, create one from train
+        train_val_split = train_dataset.train_test_split(
+            test_size=config['evaluation']['val_size']
+        )
+        train_dataset = train_val_split['train']
+        val_dataset = train_val_split['test']
+    
+    # Apply sample size limit if specified
     if config['data'].get('sample_size'):
-        dataset = dataset.take(config['data']['sample_size'])
+        train_dataset = train_dataset.select(range(min(config['data']['sample_size'], len(train_dataset))))
+    
+    # Make sure validation set is the right size
+    val_size = config['evaluation']['val_size']
+    if len(val_dataset) > val_size:
+        val_dataset = val_dataset.select(range(val_size))
     
     # Preprocessing function
     def preprocess(examples):
@@ -56,15 +81,18 @@ def main():
         tokenized["labels"] = tokenized["input_ids"].clone()
         return tokenized
     
-    # Preprocess dataset
-    tokenized_dataset = dataset.map(preprocess, batched=True, 
-                                   remove_columns=dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
+    # Preprocess datasets
+    tokenized_train = train_dataset.map(preprocess, batched=True, 
+                                   remove_columns=train_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
+    tokenized_val = val_dataset.map(preprocess, batched=True, 
+                                   remove_columns=val_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
     
     # Setup training
     os.makedirs(config['model']['output_dir'], exist_ok=True)
     training_args = TrainingArguments(
         output_dir=config['model']['output_dir'],
         per_device_train_batch_size=config['training']['per_device_train_batch_size'],
+        per_device_eval_batch_size=config['evaluation']['per_device_eval_batch_size'] if 'per_device_eval_batch_size' in config['evaluation'] else config['training']['per_device_train_batch_size'],
         gradient_accumulation_steps=config['training']['gradient_accumulation_steps'],
         num_train_epochs=config['training']['num_train_epochs'],
         learning_rate=config['training']['learning_rate'],
@@ -75,13 +103,24 @@ def main():
         prediction_loss_only=config['training']['prediction_loss_only'],
         save_total_limit=config['checkpointing']['save_total_limit'],
         save_strategy=config['checkpointing']['save_strategy'],
-        do_eval=config['evaluation']['do_eval'],
-        eval_steps=config['evaluation']['eval_steps'] if config['evaluation']['do_eval'] else None,
+        # Enable evaluation
+        do_eval=True,
+        evaluation_strategy="steps",
+        eval_steps=config['evaluation']['eval_steps'],
         warmup_steps=config['scheduler']['warmup_steps'],
+        # Load best model at end of training
+        load_best_model_at_end=config['evaluation']['load_best_model_at_end'] if 'load_best_model_at_end' in config['evaluation'] else False,
+        metric_for_best_model="eval_loss" if config['evaluation'].get('load_best_model_at_end') else None,
+        greater_is_better=False if config['evaluation'].get('load_best_model_at_end') else None,
     )
     
     # Train and save
-    trainer = Trainer(model=model, args=training_args, train_dataset=tokenized_dataset)
+    trainer = Trainer(
+        model=model, 
+        args=training_args, 
+        train_dataset=tokenized_train,
+        eval_dataset=tokenized_val
+    )
     trainer.train()
     model.save_pretrained(config['model']['output_dir'])
     tokenizer.save_pretrained(config['model']['output_dir'])
