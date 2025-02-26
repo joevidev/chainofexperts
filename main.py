@@ -15,7 +15,7 @@ torch.manual_seed(42)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a transformer language model")
-    parser.add_argument("--config", type=str, default="config/base.yaml", help="Config path")
+    parser.add_argument("--config", type=str, default="config/vanilla.yaml", help="Config path")
     parser.add_argument("--output_dir", type=str, default=None, help="Output directory")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
     parser.add_argument("--sample_size", type=int, default=None, help="Dataset sample size")
@@ -44,7 +44,8 @@ def main():
     model_config = AutoConfig.from_pretrained(config['model']['config_path'], 
                                              trust_remote_code=config['model']['trust_remote_code'])
     # override config
-    model_config.use_expert_communication = config['model']['config']['use_expert_communication']
+    for key, value in config['model']['config'].items():
+        setattr(model_config, key, value)
 
     model = AutoModelForCausalLM.from_config(model_config, 
                                             trust_remote_code=config['model']['trust_remote_code'])
@@ -57,7 +58,7 @@ def main():
     # Load and process dataset
     full_dataset = load_dataset(config['data']['name'], config['data']['config'])
     for key in full_dataset.keys():
-        full_dataset[key] = full_dataset[key].filter(lambda x: len(x['text']) >= 2000)
+        full_dataset[key] = full_dataset[key].filter(lambda x: len(x['text']) >= config['data']['preprocessing']['min_char_length'])
     # print the length of the dataset
     print(len(full_dataset['train']))
     
@@ -101,7 +102,6 @@ def main():
                                    remove_columns=val_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
     
     # run through the model once to check if it's working
-    breakpoint()
     model(torch.tensor(tokenized_train[:4]['input_ids']))
 
 

@@ -385,7 +385,7 @@ class CoMoEMLP(nn.Module):
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
         self.act_fn = ACT2FN[config.hidden_act]
 
-    def forward(self, x):
+    def forward(self, x, iter_idx=None):
         intermediate = self.first_half(x)
         return self.second_half(intermediate)
     
@@ -487,9 +487,15 @@ class CoMoE(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.gates = nn.ModuleList([
+            CoMoEGate(config)
+            for _ in range(config.num_semoe_iter)
+        ])
         self.num_experts_per_tok = config.num_experts_per_tok
         self.use_expert_communication = config.use_expert_communication
         self.collab_strength = getattr(self.config, "collaboration_strength", 0.5)
+        if self.use_expert_communication:
+            raise NotImplementedError("Expert communication is not supported in this implementation for CoMoE")
 
         if hasattr(config, "ep_size") and config.ep_size > 1:
             raise NotImplementedError("Expert parallelism is not supported in this implementation for CoMoE")
@@ -525,17 +531,16 @@ class CoMoE(nn.Module):
         if self.use_expert_communication:
             self.intermediate_router = CoMoEGate(config, gating_dim=config.moe_intermediate_size)
 
-        self.gate = CoMoEGate(config)
         if config.n_shared_experts is not None:
             intermediate_size = config.moe_intermediate_size * config.n_shared_experts
             self.shared_experts = CoMoEMLP(
                 config=config, intermediate_size=intermediate_size
             )
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states, iter_idx):
         identity = hidden_states
         orig_shape = hidden_states.shape
-        topk_idx, topk_weight = self.gate(hidden_states)
+        topk_idx, topk_weight = self.gates[iter_idx](hidden_states)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         flat_topk_idx = topk_idx.view(-1)
         # if not self.training:
@@ -550,8 +555,6 @@ class CoMoE(nn.Module):
 
     @torch.no_grad()
     def moe_processing(self, x, topk_ids, topk_weight):
-        breakpoint()
-
         # Step 1: Calculate the number of tokens per expert
         token_counts_per_expert = self._count_tokens_per_expert(topk_ids)
         
@@ -1432,6 +1435,8 @@ class CoMoEDecoderLayer(nn.Module):
     def __init__(self, config: CoMoEConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
+        self.num_semoe_iter = config.num_semoe_iter
+        self.layer_idx = layer_idx
 
         self.self_attn = ATTENTION_CLASSES[config._attn_implementation](
             config=config, layer_idx=layer_idx
@@ -1449,9 +1454,12 @@ class CoMoEDecoderLayer(nn.Module):
         self.input_layernorm = CoMoERMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
         )
-        self.post_attention_layernorm = CoMoERMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps
-        )
+        self.post_attention_layernorm = nn.ModuleList([
+            CoMoERMSNorm(
+                config.hidden_size, eps=config.rms_norm_eps
+            )
+            for _ in range(self.num_semoe_iter)
+        ])
 
     def forward(
         self,
@@ -1500,10 +1508,15 @@ class CoMoEDecoderLayer(nn.Module):
         hidden_states = residual + hidden_states
 
         # Fully Connected
+        num_iter = self.num_semoe_iter if type(self.mlp) == CoMoE else 1
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
+        intermediate_hidden_states = (residual,)
+        for iter_idx in range(num_iter):
+            hidden_states = self.post_attention_layernorm[iter_idx](hidden_states)
+            hidden_states = self.mlp(hidden_states, iter_idx)
+            hidden_states = residual + hidden_states
+            intermediate_hidden_states += (hidden_states,)
+
 
         outputs = (hidden_states,)
 
