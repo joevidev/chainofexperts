@@ -35,8 +35,11 @@ def main():
                                              trust_remote_code=config['model']['trust_remote_code'])
     model = AutoModelForCausalLM.from_config(model_config, 
                                             trust_remote_code=config['model']['trust_remote_code'])
+    if config['training']['gradient_checkpointing']:
+        model.gradient_checkpointing_enable()
     tokenizer = AutoTokenizer.from_pretrained(config['tokenizer']['path'])
     if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
+
     
     # Load and process dataset
     dataset = load_dataset(config['data']['name'], config['data']['config'], split=config['data']['split'])
@@ -54,12 +57,8 @@ def main():
         return tokenized
     
     # Preprocess dataset
-    tokenized_dataset = dataset.map(
-        preprocess, 
-        remove_columns=dataset.column_names if config['data']['preprocessing']['remove_columns'] else None,
-        desc="Tokenizing dataset",  # Add a description for the progress bar
-        load_from_cache_file=not config.get('data', {}).get('disable_caching', False)  # Enable caching by default
-    )
+    tokenized_dataset = dataset.map(preprocess, batched=True, 
+                                   remove_columns=dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
     
     # Setup training
     os.makedirs(config['model']['output_dir'], exist_ok=True)

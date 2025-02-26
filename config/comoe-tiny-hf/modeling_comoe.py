@@ -390,7 +390,7 @@ class CoMoEMLP(nn.Module):
         return down_proj
 
 
-class MoEGate(nn.Module):
+class CoMoEGate(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -515,7 +515,7 @@ class CoMoE(nn.Module):
                     for i in range(config.n_routed_experts)
                 ]
             )
-        self.gate = MoEGate(config)
+        self.gate = CoMoEGate(config)
         if config.n_shared_experts is not None:
             intermediate_size = config.moe_intermediate_size * config.n_shared_experts
             self.shared_experts = CoMoEMLP(
