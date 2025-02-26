@@ -386,12 +386,18 @@ class CoMoEMLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
-        down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-        return down_proj
-
+        intermediate = self.first_half(x)
+        return self.second_half(intermediate)
+    
+    def first_half(self, x):
+        return self.act_fn(self.gate_proj(x)) * self.up_proj(x)
+    
+    def second_half(self, intermediate_output):
+        return self.down_proj(intermediate_output)
+    
 
 class CoMoEGate(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, gating_dim=None):
         super().__init__()
         self.config = config
         self.top_k = config.num_experts_per_tok
@@ -405,7 +411,7 @@ class CoMoEGate(nn.Module):
 
         # topk selection algorithm
         self.norm_topk_prob = config.norm_topk_prob
-        self.gating_dim = config.hidden_size
+        self.gating_dim = config.hidden_size if gating_dim is None else gating_dim
         self.weight = nn.Parameter(
             torch.empty((self.n_routed_experts, self.gating_dim))
         )
@@ -483,9 +489,10 @@ class CoMoE(nn.Module):
         self.config = config
         self.num_experts_per_tok = config.num_experts_per_tok
         self.use_expert_communication = config.use_expert_communication
-        self.expert_communication_type = config.expert_communication_type
+        self.collab_strength = getattr(self.config, "collaboration_strength", 0.5)
 
         if hasattr(config, "ep_size") and config.ep_size > 1:
+            raise NotImplementedError("Expert parallelism is not supported in this implementation for CoMoE")
             assert config.ep_size == dist.get_world_size()
             self.ep_size = config.ep_size
             self.experts_per_rank = config.n_routed_experts // config.ep_size
@@ -515,6 +522,9 @@ class CoMoE(nn.Module):
                     for i in range(config.n_routed_experts)
                 ]
             )
+        if self.use_expert_communication:
+            self.intermediate_router = CoMoEGate(config, gating_dim=config.moe_intermediate_size)
+
         self.gate = CoMoEGate(config)
         if config.n_shared_experts is not None:
             intermediate_size = config.moe_intermediate_size * config.n_shared_experts
@@ -529,13 +539,19 @@ class CoMoE(nn.Module):
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         flat_topk_idx = topk_idx.view(-1)
         # if not self.training:
-        y = self.moe_processing(hidden_states, topk_idx, topk_weight).view(*orig_shape)
+        if not self.use_expert_communication:
+            y = self.moe_processing(hidden_states, topk_idx, topk_weight).view(*orig_shape)
+        else:
+            y = self.collaborative_processing(hidden_states, topk_idx, topk_weight).view(*orig_shape)
+        
         if self.config.n_shared_experts is not None:
             y = y + self.shared_experts(identity)
         return y
 
     @torch.no_grad()
     def moe_processing(self, x, topk_ids, topk_weight):
+        breakpoint()
+
         # Step 1: Calculate the number of tokens per expert
         token_counts_per_expert = self._count_tokens_per_expert(topk_ids)
         
@@ -664,6 +680,222 @@ class CoMoE(nn.Module):
         )
         return final_out
 
+    @torch.no_grad()
+    def collaborative_processing(self, x, topk_ids, topk_weight):
+        # Step 1: Calculate the number of tokens per expert
+        token_counts_per_expert = self._count_tokens_per_expert(topk_ids)
+        
+        # Step 2: Sort input tokens by expert ID for first-half processing
+        sorted_tokens, idxs = self._sort_tokens_by_expert(x, topk_ids)
+        sorted_tokens_shape = sorted_tokens.shape
+        
+        # Step 3: Handle token distribution in parallel environment (if expert parallelism enabled)
+        if self.ep_size > 1:
+            sorted_tokens, tokens_per_expert, gatherd_idxs, input_split_sizes, output_splits = self._handle_expert_parallelism(
+                sorted_tokens, token_counts_per_expert
+            )
+        else:
+            tokens_per_expert = token_counts_per_expert
+            gatherd_idxs = None
+            input_split_sizes = None
+            output_splits = None
+        
+        # Step 4: Process first half of experts to get intermediate states
+        intermediate_states = self._process_first_half_through_experts(sorted_tokens, tokens_per_expert)
+        
+        # Step 5: Gather intermediate results if in parallel environment
+        if self.ep_size > 1:
+            intermediate_states = self._gather_expert_outputs(
+                intermediate_states, gatherd_idxs, sorted_tokens_shape, input_split_sizes, output_splits
+            )
+        
+        # Step 6: Reorder intermediate states to prepare for collaboration
+        reordered_intermediates = self._reorder_intermediates(intermediate_states, idxs, topk_ids)
+        
+        # Step 7: Calculate collaboration weights between experts for each token
+        collaboration_weights = self._calculate_collaboration_weights(reordered_intermediates, topk_ids)
+        
+        # Step 8: Create collaborative intermediate states by blending across experts
+        collaborative_states = self._create_collaborative_states(reordered_intermediates, collaboration_weights, topk_ids)
+        
+        # Step 9: Process second half with collaborative states
+        # Reuse the same sorting logic for the second phase
+        collab_sorted_tokens, collab_idxs = self._sort_collaborative_states(collaborative_states, topk_ids)
+        
+        # Step 10: Handle token distribution for second phase (if expert parallelism enabled)
+        if self.ep_size > 1:
+            collab_sorted_tokens, collab_tokens_per_expert, collab_gatherd_idxs, collab_input_split_sizes, collab_output_splits = self._handle_expert_parallelism(
+                collab_sorted_tokens, token_counts_per_expert
+            )
+        else:
+            collab_tokens_per_expert = token_counts_per_expert
+            collab_gatherd_idxs = None
+            collab_input_split_sizes = None
+            collab_output_splits = None
+        
+        # Step 11: Process second half of experts with collaborative states
+        outs = self._process_second_half_through_experts(collab_sorted_tokens, collab_tokens_per_expert)
+        
+        # Step 12: Gather results in parallel environment (if expert parallelism enabled)
+        if self.ep_size > 1:
+            outs = self._gather_expert_outputs(
+                outs, collab_gatherd_idxs, collab_sorted_tokens.shape, collab_input_split_sizes, collab_output_splits
+            )
+        
+        # Step 13: Reorder outputs and combine with weights
+        final_out = self._reorder_and_combine_outputs(outs, collab_idxs, topk_ids, topk_weight)
+        
+        return final_out
+
+    def _process_first_half_through_experts(self, sorted_tokens, tokens_per_expert):
+        """Process tokens through first half of respective expert models"""
+        tokens_per_expert = tokens_per_expert.cpu().numpy()
+        outputs = []
+        start_idx = 0
+        
+        for i, num_tokens in enumerate(tokens_per_expert):
+            end_idx = start_idx + num_tokens
+            if num_tokens == 0:
+                continue
+                
+            expert = self.experts[i + self.ep_rank * self.experts_per_rank]
+            tokens_for_this_expert = sorted_tokens[start_idx:end_idx]
+            # Only run the first half of the expert processing
+            intermediate = expert.first_half(tokens_for_this_expert)
+            outputs.append(intermediate)
+            start_idx = end_idx
+        
+        outs = torch.cat(outputs, dim=0) if len(outputs) else sorted_tokens.new_empty(0)
+        return outs
+
+    def _reorder_intermediates(self, intermediate_states, idxs, topk_ids):
+        """Reorder intermediate states according to original token order"""
+        new_x = torch.empty_like(intermediate_states)
+        new_x[idxs] = intermediate_states
+        
+        # Reshape to get per-token, per-expert intermediate states
+        # Shape: [batch_size, num_experts_per_tok, hidden_dim]
+        reordered_intermediates = new_x.view(*topk_ids.shape, -1)
+        return reordered_intermediates
+
+    def _calculate_collaboration_weights(self, reordered_intermediates, topk_ids):
+        """Calculate weights for expert collaboration based on intermediate router"""
+        batch_size, num_experts_per_tok = topk_ids.shape
+        hidden_dim = reordered_intermediates.shape[-1]
+        
+        # Flatten the intermediates for routing
+        flat_intermediates = reordered_intermediates.reshape(-1, hidden_dim)
+        
+        # Get assigned expert IDs for each token
+        token_experts = topk_ids.reshape(-1)
+        
+        # Apply the intermediate router to get collaboration weights
+        inter_topk_idx, inter_topk_weight = self.intermediate_router(flat_intermediates)
+        
+        # Create a mask that only allows collaboration between assigned experts
+        collab_weights = []
+        
+        for i in range(batch_size * num_experts_per_tok):
+            # Get the experts assigned to this token
+            token_idx = i // num_experts_per_tok
+            experts_for_token = topk_ids[token_idx]
+            
+            # Create mask for valid collaboration (only between assigned experts)
+            mask = torch.zeros(self.config.n_routed_experts, 
+                            device=inter_topk_weight.device, 
+                            dtype=torch.bool)
+            mask[experts_for_token] = True
+            
+            # Get raw weights from intermediate router
+            raw_weights = inter_topk_weight[i]
+            
+            # Apply mask and normalize
+            masked_weights = raw_weights.clone()
+            masked_weights[~mask] = 0.0
+            if masked_weights.sum() > 0:
+                masked_weights = masked_weights / masked_weights.sum()
+            
+            collab_weights.append(masked_weights)
+        
+        # Stack all collaboration weights
+        collab_weights = torch.stack(collab_weights)
+        return collab_weights.view(batch_size, num_experts_per_tok, -1)
+
+    def _create_collaborative_states(self, reordered_intermediates, collaboration_weights, topk_ids):
+        """Create collaborative intermediate states by blending across experts"""
+        batch_size, num_experts_per_tok = topk_ids.shape
+        hidden_dim = reordered_intermediates.shape[-1]
+        
+        # Initialize collaborative states
+        collaborative_states = torch.zeros_like(reordered_intermediates)
+        
+        for i in range(batch_size):
+            for j in range(num_experts_per_tok):
+                # Get the expert ID for this token and expert slot
+                expert_idx = topk_ids[i, j]
+                
+                # Get base intermediate state
+                base_state = reordered_intermediates[i, j]
+                
+                # Start with the original state
+                collab_state = base_state.clone()
+                
+                # Blend with other experts' states according to collaboration weights
+                for k in range(num_experts_per_tok):
+                    if k != j:
+                        other_expert_idx = topk_ids[i, k]
+                        other_state = reordered_intermediates[i, k]
+                        
+                        # Get collaboration weight for this pair
+                        collab_factor = collaboration_weights[i, j, other_expert_idx] * self.collab_strength
+                        
+                        # Mix the states
+                        collab_state = collab_state * (1 - collab_factor) + other_state * collab_factor
+                
+                # Store the collaborative state
+                collaborative_states[i, j] = collab_state
+        
+        return collaborative_states
+
+    def _sort_collaborative_states(self, collaborative_states, topk_ids):
+        """Sort collaborative states by expert ID for second-half processing"""
+        batch_size, num_experts_per_tok, hidden_dim = collaborative_states.shape
+        
+        # Flatten token indices
+        token_indices = torch.arange(batch_size, device=topk_ids.device).repeat_interleave(num_experts_per_tok)
+        expert_indices = topk_ids.reshape(-1)
+        
+        # Sort by expert ID
+        sorted_indices = expert_indices.argsort()
+        sorted_token_indices = token_indices[sorted_indices]
+        sorted_expert_indices = expert_indices[sorted_indices]
+        
+        # Extract sorted collaborative states
+        flat_collab_states = collaborative_states.reshape(-1, hidden_dim)
+        sorted_collab_states = flat_collab_states[sorted_indices]
+        
+        return sorted_collab_states, sorted_indices
+
+    def _process_second_half_through_experts(self, sorted_collab_states, tokens_per_expert):
+        """Process collaborative states through second half of respective expert models"""
+        tokens_per_expert = tokens_per_expert.cpu().numpy()
+        outputs = []
+        start_idx = 0
+        
+        for i, num_tokens in enumerate(tokens_per_expert):
+            end_idx = start_idx + num_tokens
+            if num_tokens == 0:
+                continue
+                
+            expert = self.experts[i + self.ep_rank * self.experts_per_rank]
+            states_for_this_expert = sorted_collab_states[start_idx:end_idx]
+            # Only run the second half of the expert processing
+            expert_out = expert.second_half(states_for_this_expert)
+            outputs.append(expert_out)
+            start_idx = end_idx
+        
+        outs = torch.cat(outputs, dim=0) if len(outputs) else sorted_collab_states.new_empty(0)
+        return outs
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:

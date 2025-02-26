@@ -4,7 +4,6 @@ model:
   output_dir: "./comoe_pretrained"
   config:
     use_expert_communication: true
-    expert_communication_type: "default"
 
 
 

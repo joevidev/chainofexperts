@@ -1,0 +1,60 @@
+model:
+  config_path: "config/comoe-tiny-hf"
+  trust_remote_code: true
+  output_dir: "./comoe_pretrained"
+  config:
+    use_expert_communication: false
+    expert_communication_type: "default"
+
+
+
+tokenizer:
+  path: "config/r1-tokenizer-hf"
+  max_length: 512
+  padding: "max_length"
+  return_tensors: "pt"
+
+data:
+  name: "wikitext"
+  config: "wikitext-103-v1"
+  split: "train"
+  sample_size: 24000
+  preprocessing:
+    truncation: true
+    max_length: 512
+    padding: "max_length"
+    return_tensors: "pt"
+    remove_columns: true
+
+training:
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  gradient_checkpointing: true
+  num_train_epochs: 3
+  learning_rate: 5.0e-5
+  weight_decay: 0.01
+  save_steps: 1000
+  logging_steps: 1
+  fp16: true
+  prediction_loss_only: true
+
+optimizer:
+  type: "AdamW"
+  beta1: 0.9
+  beta2: 0.999
+  epsilon: 1.0e-8
+
+scheduler:
+  type: "linear"
+  warmup_steps: 500
+
+evaluation:
+  do_eval: true
+  eval_steps: 100
+  val_size: 1024
+  per_device_eval_batch_size: 8
+  load_best_model_at_end: true
+
+checkpointing:
+  save_total_limit: 3
+  save_strategy: "steps"

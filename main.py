@@ -4,6 +4,14 @@ import yaml
 import os
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 from datasets import load_dataset
+import torch
+import random
+import numpy as np
+
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a transformer language model")
@@ -37,7 +45,6 @@ def main():
                                              trust_remote_code=config['model']['trust_remote_code'])
     # override config
     model_config.use_expert_communication = config['model']['config']['use_expert_communication']
-    model_config.expert_communication_type = config['model']['config']['expert_communication_type']
 
     model = AutoModelForCausalLM.from_config(model_config, 
                                             trust_remote_code=config['model']['trust_remote_code'])
@@ -49,18 +56,24 @@ def main():
     
     # Load and process dataset
     full_dataset = load_dataset(config['data']['name'], config['data']['config'])
+    for key in full_dataset.keys():
+        full_dataset[key] = full_dataset[key].filter(lambda x: len(x['text']) >= 2000)
+    # print the length of the dataset
+    print(len(full_dataset['train']))
     
     # Split into train and validation
     train_dataset = full_dataset[config['data']['split']]
-    if 'validation' in full_dataset:
-        val_dataset = full_dataset['validation']
-    else:
+    # if 'validation' in full_dataset:
+    #     val_dataset = full_dataset['validation']
+    # else:
         # If no validation split exists, create one from train
-        train_val_split = train_dataset.train_test_split(
-            test_size=config['evaluation']['val_size']
-        )
-        train_dataset = train_val_split['train']
-        val_dataset = train_val_split['test']
+    train_val_split = train_dataset.train_test_split(
+        test_size=config['evaluation']['val_size'],
+        seed=42,
+        shuffle=True
+    )
+    train_dataset = train_val_split['train']
+    val_dataset = train_val_split['test']
     
     # Apply sample size limit if specified
     if config['data'].get('sample_size'):
@@ -87,6 +100,11 @@ def main():
     tokenized_val = val_dataset.map(preprocess, batched=True, 
                                    remove_columns=val_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
     
+    # run through the model once to check if it's working
+    breakpoint()
+    model(torch.tensor(tokenized_train[:4]['input_ids']))
+
+
     # Setup training
     os.makedirs(config['model']['output_dir'], exist_ok=True)
     training_args = TrainingArguments(
