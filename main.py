@@ -56,8 +56,6 @@ def main():
     # Preprocess dataset
     tokenized_dataset = dataset.map(
         preprocess, 
-        batched=True,
-        batch_size=1000,
         remove_columns=dataset.column_names if config['data']['preprocessing']['remove_columns'] else None,
         desc="Tokenizing dataset",  # Add a description for the progress bar
         load_from_cache_file=not config.get('data', {}).get('disable_caching', False)  # Enable caching by default
