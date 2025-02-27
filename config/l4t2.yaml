@@ -35,8 +35,8 @@ tokenizer:
   return_tensors: "pt"
 
 data:
-  name: "togethercomputer/RedPajama-Data-1T"
-  config: "wikipedia"
+  name: "hoskinson-center/proof-pile"
+  config: null
   split: "train"
   sample_size: 1000000
   preprocessing:
