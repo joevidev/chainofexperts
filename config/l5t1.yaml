@@ -19,8 +19,8 @@ model:
 
 
 training:
-  per_device_train_batch_size: 256
-  gradient_accumulation_steps: 1
+  per_device_train_batch_size: 64
+  gradient_accumulation_steps: 4
   gradient_checkpointing: true
   num_train_epochs: 3
   learning_rate: 1.0e-3
