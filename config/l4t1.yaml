@@ -1,7 +1,7 @@
 model:
   config_path: "config/coe-tiny-hf-v2"
   trust_remote_code: true
-  output_dir: "./output/coe-l4t1"
+  output_dir: "./output/coe-v2-l4t1"
   config:
     use_expert_communication: false
     inner_iter: 1
@@ -18,8 +18,9 @@ model:
     qk_rope_head_dim: 16
 
 
+
 training:
-  per_device_train_batch_size: 256
+  per_device_train_batch_size: 32
   gradient_accumulation_steps: 1
   gradient_checkpointing: true
   num_train_epochs: 3
@@ -40,7 +41,7 @@ optimizer:
 tokenizer:
   path: "config/coe-tiny-hf-v2"
   # max_length: 2048
-  max_length: 128
+  max_length: 1024
   padding: "max_length"
   return_tensors: "pt"
 
@@ -55,7 +56,7 @@ data:
     min_char_length: 50
     truncation: true
     # max_length: 2048
-    max_length: 128
+    max_length: 1024
     padding: "max_length"
     return_tensors: "pt"
     remove_columns: true
