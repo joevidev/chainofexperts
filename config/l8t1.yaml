@@ -1,7 +1,7 @@
 model:
   config_path: "config/coe-tiny-hf-v2"
   trust_remote_code: true
-  output_dir: "./output/coe"
+  output_dir: "./output/coe-l8t1"
   config:
     use_expert_communication: false
     inner_iter: 1

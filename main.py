@@ -56,7 +56,7 @@ def main():
 
     
     # Load and process dataset
-    full_dataset = load_dataset(config['data']['name'], config['data']['config'])
+    full_dataset = load_dataset(config['data']['name'], config['data']['config'], trust_remote_code=True)
     for key in full_dataset.keys():
         full_dataset[key] = full_dataset[key].filter(lambda x: len(x['text']) >= config['data']['preprocessing']['min_char_length'])
     # print the length of the dataset
