@@ -15,7 +15,7 @@ torch.manual_seed(42)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a transformer language model")
-    parser.add_argument("--config", type=str, default="config/vanilla.yaml", help="Config path")
+    parser.add_argument("--config", type=str, default="config/SeMoE-v2.yaml", help="Config path")
     parser.add_argument("--output_dir", type=str, default=None, help="Output directory")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
     parser.add_argument("--sample_size", type=int, default=None, help="Dataset sample size")
@@ -102,8 +102,8 @@ def main():
                                    remove_columns=val_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
     
     # run through the model once to check if it's working
-    model(torch.tensor(tokenized_train[:4]['input_ids']))
-
+    # model(torch.tensor(tokenized_train[:4]['input_ids']))
+    print("Number of parameters: ", sum(p.numel() for p in model.parameters()))
 
     # Setup training
     os.makedirs(config['model']['output_dir'], exist_ok=True)
@@ -112,6 +112,7 @@ def main():
         per_device_train_batch_size=config['training']['per_device_train_batch_size'],
         per_device_eval_batch_size=config['evaluation']['per_device_eval_batch_size'] if 'per_device_eval_batch_size' in config['evaluation'] else config['training']['per_device_train_batch_size'],
         gradient_accumulation_steps=config['training']['gradient_accumulation_steps'],
+        max_grad_norm=config['training']['max_grad_norm'],
         num_train_epochs=config['training']['num_train_epochs'],
         learning_rate=config['training']['learning_rate'],
         weight_decay=config['training']['weight_decay'],
