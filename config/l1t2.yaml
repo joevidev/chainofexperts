@@ -20,12 +20,12 @@ model:
 
 
 training:
-  per_device_train_batch_size: 32
-  gradient_accumulation_steps: 1
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 8
   gradient_checkpointing: true
   num_train_epochs: 3
   learning_rate: 1.0e-3
-  max_grad_norm: 1.0
+  max_grad_norm: 100.0
   weight_decay: 0.01
   save_steps: 0
   logging_steps: 1
