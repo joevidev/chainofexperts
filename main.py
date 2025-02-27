@@ -54,7 +54,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(config['tokenizer']['path'])
     if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
 
-    breakpoint()
+    # breakpoint()
 
     # Load and process dataset
     full_dataset = load_dataset(config['data']['name'], config['data']['config'], trust_remote_code=True)
