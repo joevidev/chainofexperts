@@ -2,7 +2,7 @@
 import argparse
 import yaml
 import os
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments, DataCollatorForLanguageModeling
 from datasets import load_dataset
 import torch
 import random
@@ -86,20 +86,38 @@ def main():
         val_dataset = val_dataset.select(range(val_size))
     
     # Preprocessing function
-    def preprocess(examples):
-        tokenized = tokenizer(examples["text"], 
-                             truncation=config['data']['preprocessing']['truncation'],
-                             max_length=config['data']['preprocessing']['max_length'],
-                             padding=config['data']['preprocessing']['padding'],
-                             return_tensors=config['data']['preprocessing']['return_tensors'])
-        tokenized["labels"] = tokenized["input_ids"].clone()
-        return tokenized
+    # def preprocess(examples):
+    #     tokenized = tokenizer(examples["text"], 
+    #                          truncation=config['data']['preprocessing']['truncation'],
+    #                          max_length=config['data']['preprocessing']['max_length'],
+    #                          padding=config['data']['preprocessing']['padding'],
+    #                          return_tensors=config['data']['preprocessing']['return_tensors'])
+    #     tokenized["labels"] = tokenized["input_ids"].clone()
+    #     return tokenized
+    # # Preprocess datasets
+    # tokenized_train = train_dataset.map(preprocess, batched=True, 
+    #                                remove_columns=train_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
+    # tokenized_val = val_dataset.map(preprocess, batched=True, 
+    #                                remove_columns=val_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False
+    )
+    def extract_text(examples):
+        return {"text": examples["text"]}
+
+    train_dataset = train_dataset.map(
+        extract_text, 
+        batched=True,
+        remove_columns=[col for col in train_dataset.column_names if col != "text"]
+    )    
+    val_dataset = val_dataset.map(
+        extract_text, 
+        batched=True,
+        remove_columns=[col for col in val_dataset.column_names if col != "text"]
+    )
+
     
-    # Preprocess datasets
-    tokenized_train = train_dataset.map(preprocess, batched=True, 
-                                   remove_columns=train_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
-    tokenized_val = val_dataset.map(preprocess, batched=True, 
-                                   remove_columns=val_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
     
     # run through the model once to check if it's working
     # model(torch.tensor(tokenized_train[:4]['input_ids']))
@@ -131,14 +149,30 @@ def main():
         load_best_model_at_end=config['evaluation']['load_best_model_at_end'] if 'load_best_model_at_end' in config['evaluation'] else False,
         metric_for_best_model="eval_loss" if config['evaluation'].get('load_best_model_at_end') else None,
         greater_is_better=False if config['evaluation'].get('load_best_model_at_end') else None,
+        dataloader_num_workers=4, 
+        dataloader_pin_memory=True,  
+        remove_unused_columns=False
     )
+
+    def custom_data_collator(features):
+        texts = [f["text"] for f in features]
+        batch = tokenizer(
+            texts,
+            padding=config['data']['preprocessing']['padding'],
+            truncation=config['data']['preprocessing']['truncation'],
+            max_length=config['data']['preprocessing']['max_length'],
+            return_tensors="pt"
+        )
+        batch["labels"] = batch["input_ids"].clone()
+        return batch
     
     # Train and save
     trainer = Trainer(
         model=model, 
         args=training_args, 
-        train_dataset=tokenized_train,
-        eval_dataset=tokenized_val
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+        data_collator=custom_data_collator
     )
     trainer.train()
     model.save_pretrained(config['model']['output_dir'])

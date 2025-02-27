@@ -30,19 +30,23 @@ optimizer:
 
 tokenizer:
   path: "config/coe-tiny-hf-v2"
-  max_length: 2048
+  # max_length: 2048
+  max_length: 128
   padding: "max_length"
   return_tensors: "pt"
 
 data:
-  name: "hoskinson-center/proof-pile"
+  # name: "hoskinson-center/proof-pile"
+  name: "iohadrubin/wikitext-103-raw-v1"
   config: null
   split: "train"
   sample_size: 1000000
   preprocessing:
-    min_char_length: 2000
+    # min_char_length: 2000
+    min_char_length: 50
     truncation: true
-    max_length: 2048
+    # max_length: 2048
+    max_length: 128
     padding: "max_length"
     return_tensors: "pt"
     remove_columns: true

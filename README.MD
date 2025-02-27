@@ -91,3 +91,9 @@ For r1-tiny-hf (800M scale), we've applied more aggressive scaling than the v2-l
 
 
 We follow the empirical scaling patterns observed in DeepSeek's V2 series while respecting the unique architectural elements of the R1 model.
+
+
+https://github.com/Zjh-819/LLMDataHub?tab=readme-ov-file#pretrain
+https://huggingface.co/datasets/hoskinson-center/proof-pile
+https://huggingface.co/datasets/wangrui6/Zhihu-KOL
+https://huggingface.co/datasets/Linly-AI/Chinese-pretraining-dataset
