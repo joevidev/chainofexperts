@@ -54,7 +54,8 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(config['tokenizer']['path'])
     if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
 
-    
+    # breakpoint()
+
     # Load and process dataset
     full_dataset = load_dataset(config['data']['name'], config['data']['config'], trust_remote_code=True)
     for key in full_dataset.keys():
@@ -75,7 +76,6 @@ def main():
     )
     train_dataset = train_val_split['train']
     val_dataset = train_val_split['test']
-    
     # Apply sample size limit if specified
     if config['data'].get('sample_size'):
         train_dataset = train_dataset.select(range(min(config['data']['sample_size'], len(train_dataset))))
