@@ -15,7 +15,7 @@ torch.manual_seed(42)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a transformer language model")
-    parser.add_argument("--config", type=str, default="config/SeMoE-v2.yaml", help="Config path")
+    parser.add_argument("--config", type=str, default="config/base.yaml", help="Config path")
     parser.add_argument("--output_dir", type=str, default=None, help="Output directory")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
     parser.add_argument("--sample_size", type=int, default=None, help="Dataset sample size")
