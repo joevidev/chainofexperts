@@ -4,9 +4,9 @@ from transformers.utils import logging
 logger = logging.get_logger(__name__)
 
 DEEPSEEK_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
-class DeepseekV2Config(PretrainedConfig):
+class CoEConfig(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`DeepseekV2Model`]. It is used to instantiate an DeepSeek
+    This is the configuration class to store the configuration of a [`CoEModel`]. It is used to instantiate an DeepSeek
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
     defaults will yield a similar configuration to that of the DeepSeek-V2.
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
@@ -14,7 +14,7 @@ class DeepseekV2Config(PretrainedConfig):
     Args:
         vocab_size (`int`, *optional*, defaults to 102400):
             Vocabulary size of the Deep model. Defines the number of different tokens that can be represented by the
-            `inputs_ids` passed when calling [`DeepseekV2Model`]
+            `inputs_ids` passed when calling [`CoEModel`]
         hidden_size (`int`, *optional*, defaults to 4096):
             Dimension of the hidden representations.
         intermediate_size (`int`, *optional*, defaults to 11008):
@@ -96,9 +96,9 @@ class DeepseekV2Config(PretrainedConfig):
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
     ```python
-    >>> from transformers import DeepseekV2Model, DeepseekV2Config
+    >>> from transformers import CoEModel, CoEConfig
     >>> # Initializing a Deepseek-V2 style configuration
-    >>> configuration = DeepseekV2Config()
+    >>> configuration = CoEConfig()
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
