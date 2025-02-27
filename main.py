@@ -23,7 +23,45 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=None, help="Training epochs")
     parser.add_argument("--fp16", action="store_true", default=None, help="Use fp16")
     parser.add_argument("--val_size", type=int, default=None, help="Validation dataset size")
+    # Add argument for additional nested configurations
+    parser.add_argument('nested_configs', nargs='*', help='Additional nested configurations in the format key1.key2=value')
     return parser.parse_args()
+
+def update_nested_dict(d, key_path, value):
+    """
+    Update a nested dictionary using a key path.
+    Example: update_nested_dict(config, "model.config.num_hidden_layers", 8)
+    """
+    keys = key_path.split('.')
+    current = d
+    
+    # Navigate to the second-to-last key
+    for key in keys[:-1]:
+        if key not in current:
+            current[key] = {}
+        current = current[key]
+    
+    # Handle different value types
+    value_str = str(value)
+    # Try to convert to appropriate type
+    if value_str.lower() == 'true':
+        value = True
+    elif value_str.lower() == 'false':
+        value = False
+    else:
+        try:
+            # Try as int
+            if value_str.isdigit() or (value_str[0] == '-' and value_str[1:].isdigit()):
+                value = int(value_str)
+            # Try as float
+            else:
+                value = float(value_str)
+        except ValueError:
+            # Keep as string if not a number
+            pass
+    
+    # Set the value
+    current[keys[-1]] = value
 
 def main():
     # Setup
@@ -40,6 +78,12 @@ def main():
     if args.fp16 is not None: config['training']['fp16'] = args.fp16
     if args.val_size: config['evaluation']['val_size'] = args.val_size
     
+    # Process nested configuration arguments
+    for nested_config in args.nested_configs:
+        if '=' in nested_config:
+            key_path, value = nested_config.split('=', 1)
+            update_nested_dict(config, key_path, value)
+    
     # Create model, tokenizer
     model_config = AutoConfig.from_pretrained(config['model']['config_path'], 
                                              trust_remote_code=config['model']['trust_remote_code'])
@@ -54,21 +98,32 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(config['tokenizer']['path'])
     if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
 
-    # breakpoint()
-
     # Load and process dataset
     full_dataset = load_dataset(config['data']['name'], config['data']['config'], trust_remote_code=True)
-    for key in full_dataset.keys():
-        full_dataset[key] = full_dataset[key].filter(lambda x: len(x['text']) >= config['data']['preprocessing']['min_char_length'])
-    # print the length of the dataset
-    print(len(full_dataset['train']))
+
+    def extract_text(example):
+        return {"text": example["text"]}
+
+    def extract_text_math(example):
+        return {
+            "text": 'Question:' + example['original_question'] + '\nAnswer: ' + example['response']
+        }
+    
+    if 'math' in config['data']['name']:
+        proc_func = extract_text_math
+    else:
+        proc_func = extract_text
+
+    train_dataset = full_dataset[config['data']['split']]
+    train_dataset = train_dataset.map(
+        proc_func, 
+        remove_columns=[col for col in train_dataset.column_names if col != "text"]
+    )
     
     # Split into train and validation
-    train_dataset = full_dataset[config['data']['split']]
-    # if 'validation' in full_dataset:
-    #     val_dataset = full_dataset['validation']
-    # else:
-        # If no validation split exists, create one from train
+    train_dataset = train_dataset.filter(lambda x: len(x['text']) >= config['data']['preprocessing']['min_char_length'])
+    # print(len(train_dataset))
+    
     train_val_split = train_dataset.train_test_split(
         test_size=config['evaluation']['val_size'],
         seed=42,
@@ -85,40 +140,11 @@ def main():
     if len(val_dataset) > val_size:
         val_dataset = val_dataset.select(range(val_size))
     
-    # Preprocessing function
-    # def preprocess(examples):
-    #     tokenized = tokenizer(examples["text"], 
-    #                          truncation=config['data']['preprocessing']['truncation'],
-    #                          max_length=config['data']['preprocessing']['max_length'],
-    #                          padding=config['data']['preprocessing']['padding'],
-    #                          return_tensors=config['data']['preprocessing']['return_tensors'])
-    #     tokenized["labels"] = tokenized["input_ids"].clone()
-    #     return tokenized
-    # # Preprocess datasets
-    # tokenized_train = train_dataset.map(preprocess, batched=True, 
-    #                                remove_columns=train_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
-    # tokenized_val = val_dataset.map(preprocess, batched=True, 
-    #                                remove_columns=val_dataset.column_names if config['data']['preprocessing']['remove_columns'] else None)
     data_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=False
     )
-    # def extract_text(examples):
-    #     return {"text": examples["text"]}
 
-    # train_dataset = train_dataset.map(
-    #     extract_text, 
-    #     batched=True,
-    #     remove_columns=[col for col in train_dataset.column_names if col != "text"]
-    # )    
-    # val_dataset = val_dataset.map(
-    #     extract_text, 
-    #     batched=True,
-    #     remove_columns=[col for col in val_dataset.column_names if col != "text"]
-    # )
-
-    
-    
     # run through the model once to check if it's working
     # model(torch.tensor(tokenized_train[:4]['input_ids']))
     print("Number of parameters: ", sum(p.numel() for p in model.parameters()))
@@ -163,7 +189,10 @@ def main():
             max_length=config['data']['preprocessing']['max_length'],
             return_tensors="pt"
         )
-        batch["labels"] = batch["input_ids"].clone()
+        batch["labels"] = torch.where(batch["input_ids"] == tokenizer.pad_token_id, -100, batch["input_ids"])
+        print((batch['labels'] == -100).sum() / batch['labels'].shape[0] / batch['labels'].shape[1])
+        # print(batch['labels'].shape)
+        # print((batch['labels'] == -100).sum())
         return batch
     
     # Train and save
