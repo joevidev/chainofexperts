@@ -103,19 +103,19 @@ def main():
         tokenizer=tokenizer,
         mlm=False
     )
-    def extract_text(examples):
-        return {"text": examples["text"]}
+    # def extract_text(examples):
+    #     return {"text": examples["text"]}
 
-    train_dataset = train_dataset.map(
-        extract_text, 
-        batched=True,
-        remove_columns=[col for col in train_dataset.column_names if col != "text"]
-    )    
-    val_dataset = val_dataset.map(
-        extract_text, 
-        batched=True,
-        remove_columns=[col for col in val_dataset.column_names if col != "text"]
-    )
+    # train_dataset = train_dataset.map(
+    #     extract_text, 
+    #     batched=True,
+    #     remove_columns=[col for col in train_dataset.column_names if col != "text"]
+    # )    
+    # val_dataset = val_dataset.map(
+    #     extract_text, 
+    #     batched=True,
+    #     remove_columns=[col for col in val_dataset.column_names if col != "text"]
+    # )
 
     
     
