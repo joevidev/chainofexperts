@@ -30,6 +30,10 @@ from verl.utils.fs import copy_to_local
 from verl.utils.model import compute_position_id_with_mask
 from verl.utils import hf_tokenizer
 
+from datasets import load_dataset, Dataset as HFDataset
+from transformers import PreTrainedTokenizer, AutoTokenizer
+import os
+
 
 class BaseDataset(Dataset):
     """
@@ -65,38 +69,61 @@ class BaseDataset(Dataset):
             self.parquet_files[i] = copy_to_local(parquet_file, verbose=True)
 
     def _read_files_and_tokenize(self):
-
-        def series_to_item(ls):
-            import pandas, numpy
-            while isinstance(ls, (pandas.core.series.Series, numpy.ndarray)) and len(ls) == 1:
-                ls = ls[0]
-            return ls
-
-        def merge_text(ls, key):
-            output_text = ""
-            for k in key:
-                output_text += k + " : "
-                output_text += ls[k]
-            return output_text
+        """Load Parquet files using datasets library and process efficiently"""
+        print("Loading Parquet files...")
+        
+        # Load Parquet files with HuggingFace datasets
+        datasets_list = []
+        for file in self.parquet_files:
+            # Check if file exists
+            if not os.path.exists(file):
+                raise FileNotFoundError(f"File not found: {file}")
                 
-        dataframes = []
-        for parquet_file in self.parquet_files:
-            # read parquet files and cache
-            dataframe = pd.read_parquet(parquet_file)
-            dataframes.append(dataframe)
-        self.texts = pd.concat(dataframes)
-        for key in self.text_keys:
-            # type(x): pandas.core.series.Series
-            # type(x[0]): numpy.ndarray
-            # type(x[0][0]): dict
+            # Load Parquet file with datasets library
             try:
-                self.texts = self.texts.apply(lambda x: series_to_item(x)[key], axis=1)
-            except Exception:
-                print(f'self.texts={self.texts}')
+                ds = load_dataset('parquet', data_files=file, split='train')
+                datasets_list.append(ds)
+            except Exception as e:
+                print(f"Error loading file {file}: {e}")
                 raise
-            if len(key) > 0:
-                self.texts = self.texts.apply(lambda x: merge_text(x, key), axis=1)
-        self.texts = self.texts.tolist()
+        
+        # Combine multiple datasets if needed
+        if len(datasets_list) > 1:
+            dataset = HFDataset.concatenate(datasets_list)
+        else:
+            dataset = datasets_list[0]
+        
+        print(f"Loaded {len(dataset)} records")
+        
+        # Process text fields efficiently using datasets' map function
+        def combine_text_fields(example):
+            combined_text = ""
+            
+            # Process text keys
+            for key in self.text_keys[0]:
+                if key in example:
+                    value = example[key]
+                    # Handle potential nested structures
+                    while isinstance(value, (list, tuple)) and len(value) == 1:
+                        value = value[0]
+                    
+                    # Add to combined text
+                    combined_text += f"{key} : {value} "
+            
+            return {"combined_text": combined_text.strip()}
+        
+        print("Processing text fields...")
+        processed_dataset = dataset.map(
+            combine_text_fields,
+            num_proc=os.cpu_count(),  # Parallel processing
+            desc="Combining text fields"
+        )
+        
+        # Extract processed texts to list
+        # print(processed_dataset)
+        self.texts = processed_dataset["combined_text"]
+        print(f"Processed {len(self.texts)} texts")
+        # print(self.texts[0])
 
     def __len__(self):
         return len(self.texts)
