@@ -2,3 +2,7 @@ wandb
 outputs
 comoe_pretrained
 output
+
+__pycache__/
+*.py[cod]
+*$py.class

@@ -17,6 +17,10 @@ The final deliverable for this project will be a simple, well-documented code re
 
 
 ## Configuration
+```bash
+bash scripts/setup.sh
+bash train.sh
+```
 
 The r1-hf configuration is directly borrowed from the DeepSeek-R1 repository.
 
