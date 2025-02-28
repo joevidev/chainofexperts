@@ -1,11 +1,11 @@
 {
   "architectures": [
-    "GPTNeoXForCausalLM"
+    "GPTNeoXMoEForCausalLM"
   ],
   "auto_map": {
-    "AutoConfig": "configuration_gpt_neox.GPTNeoXConfig",
-    "AutoModel": "modeling_gpt_neox.GPTNeoXModel",
-    "AutoModelForCausalLM": "modeling_gpt_neox.GPTNeoXForCausalLM"
+    "AutoConfig": "configuration_gpt_neox_moe.GPTNeoXMoEConfig",
+    "AutoModel": "modeling_gpt_neox_moe.GPTNeoXMoEModel",
+    "AutoModelForCausalLM": "modeling_gpt_neox_moe.GPTNeoXMoEForCausalLM"
   },
   "bos_token_id": 0,
   "classifier_dropout": 0.1,
@@ -16,7 +16,7 @@
   "intermediate_size": 3072,
   "layer_norm_eps": 1e-05,
   "max_position_embeddings": 2048,
-  "model_type": "gpt_neox",
+  "model_type": "gpt_neox_moe",
   "num_attention_heads": 12,
   "num_hidden_layers": 12,
   "rotary_emb_base": 10000,

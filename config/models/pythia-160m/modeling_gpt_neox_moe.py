@@ -8,23 +8,24 @@ from typing import Callable, Optional, Tuple, Union
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
-from ...activations import ACT2FN
-from ...cache_utils import Cache, DynamicCache, StaticCache
-from ...generation import GenerationMixin
-from ...modeling_attn_mask_utils import AttentionMaskConverter
-from ...modeling_flash_attention_utils import FlashAttentionKwargs
-from ...modeling_outputs import (
+from transformers.activations import ACT2FN
+from transformers.cache_utils import Cache, DynamicCache, StaticCache
+from transformers.generation import GenerationMixin
+from transformers.modeling_attn_mask_utils import AttentionMaskConverter
+from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
+from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast,
     QuestionAnsweringModelOutput,
     SequenceClassifierOutputWithPast,
     TokenClassifierOutput,
 )
-from ...modeling_rope_utils import ROPE_INIT_FUNCTIONS
-from ...modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
-from ...processing_utils import Unpack
-from ...utils import (
+from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
+from transformers.processing_utils import Unpack
+from transformers.utils import (
     LossKwargs,
     add_code_sample_docstrings,
     add_start_docstrings,
@@ -32,19 +33,19 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
-from .configuration_gpt_neox import GPTNeoXConfig
+from .configuration_gpt_neox_moe import GPTNeoXMoEConfig
 
 
 logger = logging.get_logger(__name__)
 
 
-_CHECKPOINT_FOR_DOC = "trl-internal-testing/tiny-random-GPTNeoXForCausalLM"
-_CONFIG_FOR_DOC = "GPTNeoXConfig"
+_CHECKPOINT_FOR_DOC = "trl-internal-testing/tiny-random-GPTNeoXMoEForCausalLM"
+_CONFIG_FOR_DOC = "GPTNeoXMoEConfig"
 
 
-class GPTNeoXMLP(nn.Module):
+class GPTNeoXMoEMLP(nn.Module):
     """
-    MoE extension of GPTNeoXMLP with configurable sparsity and granularity
+    MoE extension of GPTNeoXMoEMLP with configurable sparsity and granularity
     
     Args:
         config: Configuration object with the following properties:
@@ -81,34 +82,33 @@ class GPTNeoXMLP(nn.Module):
             self.router = nn.Linear(self.hidden_size, self.num_experts, bias=False)
             
             # Create experts - each expert has a smaller intermediate size
-            self.h_to_4h_experts = nn.ModuleList([
-                nn.Linear(self.hidden_size, self.expert_size)
+            self.experts = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(self.hidden_size, self.expert_size),
+                    ACT2FN[config.hidden_act],
+                    nn.Linear(self.expert_size, self.hidden_size)
+                )
                 for _ in range(self.num_experts)
             ])
-            
-            self.h_to_4h_experts_4h_to_h = nn.ModuleList([
-                nn.Linear(self.expert_size, self.hidden_size)
-                for _ in range(self.num_experts)
-            ])
-        
+
         self.act = ACT2FN[config.hidden_act]
 
     def forward(self, hidden_states):
         # If not using MoE, fallback to standard MLP behavior
         if not self.is_moe:
-            return super().forward(hidden_states)
+            intermediate = self.dense_h_to_4h(hidden_states)
+            intermediate = self.act(intermediate)
+            output = self.dense_4h_to_h(intermediate)
+            return output
         
-        # Store original shape
-        original_shape = hidden_states.shape
-        batch_size, seq_len, hidden_dim = original_shape
-        
-        # Reshape for routing
-        hidden_states_2d = hidden_states.view(-1, self.hidden_size)
+        # Store original shape and dtype
+        orig_shape = hidden_states.shape
+        orig_dtype = hidden_states.dtype
+        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         
         # Calculate routing probabilities
-        router_logits = self.router(hidden_states_2d)
-        routing_weights = F.sigmoid(router_logits)
-        routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
+        router_logits = self.router(hidden_states)
+        routing_weights = F.softmax(router_logits, dim=-1)
         
         # Select top-k experts
         topk_weights, topk_idx = torch.topk(
@@ -118,7 +118,7 @@ class GPTNeoXMLP(nn.Module):
         )
         
         # Normalize the weights
-        topk_weights = topk_weights / (topk_weights.sum(dim=-1, keepdim=True) + 1e-20)
+        topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
         
         # For inference, use the efficient implementation
         if not self.training:
@@ -130,11 +130,15 @@ class GPTNeoXMLP(nn.Module):
         )
         flat_topk_idx = topk_idx.view(-1)
         
-        y = torch.empty_like(hidden_states)
+        # Create output tensor with the SAME dtype as hidden_states
+        y = torch.empty_like(hidden_states, dtype=orig_dtype)
+        
         for i, expert in enumerate(self.experts):
             mask = flat_topk_idx == i
             if mask.any():
-                y[mask] = expert(hidden_states[mask])
+                # Convert expert output to the same dtype as y
+                expert_output = expert(hidden_states[mask])
+                y[mask] = expert_output.to(dtype=orig_dtype)
         
         y = (y.view(*topk_weights.shape, -1) * topk_weights.unsqueeze(-1)).sum(dim=1)
         return y.view(orig_shape)
@@ -268,7 +272,7 @@ def eager_attention_forward(
     return attn_output, attn_weights
 
 
-class GPTNeoXAttention(nn.Module):
+class GPTNeoXMoEAttention(nn.Module):
     def __init__(self, config, layer_idx=None):
         super().__init__()
         self.config = config
@@ -355,7 +359,7 @@ class GPTNeoXAttention(nn.Module):
         return attn_output, attn_weights
 
 
-class GPTNeoXLayer(nn.Module):
+class GPTNeoXMoELayer(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
         self.use_parallel_residual = config.use_parallel_residual
@@ -363,8 +367,8 @@ class GPTNeoXLayer(nn.Module):
         self.post_attention_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.post_attention_dropout = nn.Dropout(config.hidden_dropout)
         self.post_mlp_dropout = nn.Dropout(config.hidden_dropout)
-        self.attention = GPTNeoXAttention(config, layer_idx)
-        self.mlp = GPTNeoXMLP(config)
+        self.attention = GPTNeoXMoEAttention(config, layer_idx)
+        self.mlp = GPTNeoXMoEMLP(config)
 
     def forward(
         self,
@@ -415,8 +419,8 @@ class GPTNeoXLayer(nn.Module):
         return outputs
 
 
-class GPTNeoXRotaryEmbedding(nn.Module):
-    def __init__(self, config: GPTNeoXConfig, device=None):
+class GPTNeoXMoERotaryEmbedding(nn.Module):
+    def __init__(self, config: GPTNeoXMoEConfig, device=None):
         super().__init__()
         # BC: "rope_type" was originally "type"
         if hasattr(config, "rope_scaling") and config.rope_scaling is not None:
@@ -486,7 +490,7 @@ GPT_NEOX_START_DOCSTRING = r"""
     and behavior.
 
     Parameters:
-        config ([`GPTNeoXConfig`]):
+        config ([`GPTNeoXMoEConfig`]):
             Model configuration class with all the parameters of the model. Initializing with a config file does not
             load the weights associated with the model, only the configuration. Check out the
             [`~PreTrainedModel.from_pretrained`] method to load the model weights.
@@ -494,14 +498,14 @@ GPT_NEOX_START_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare GPTNeoX Model outputting raw hidden-states without any specific head on top.",
+    "The bare GPTNeoXMoE Model outputting raw hidden-states without any specific head on top.",
     GPT_NEOX_START_DOCSTRING,
 )
-class GPTNeoXPreTrainedModel(PreTrainedModel):
-    config_class = GPTNeoXConfig
+class GPTNeoXMoEPreTrainedModel(PreTrainedModel):
+    config_class = GPTNeoXMoEConfig
     base_model_prefix = "gpt_neox"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["GPTNeoXLayer"]
+    _no_split_modules = ["GPTNeoXMoELayer"]
     _skip_keys_device_placement = ["past_key_values"]
     _supports_flash_attn_2 = True
     _supports_sdpa = True
@@ -606,15 +610,15 @@ GPT_NEOX_INPUTS_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare GPTNeoX Model outputting raw hidden-states without any specific head on top.",
+    "The bare GPTNeoXMoE Model outputting raw hidden-states without any specific head on top.",
     GPT_NEOX_START_DOCSTRING,
 )
-class GPTNeoXModel(GPTNeoXPreTrainedModel):
+class GPTNeoXMoEModel(GPTNeoXMoEPreTrainedModel):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`GPTNeoXDecoderLayer`]
+    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`GPTNeoXMoEDecoderLayer`]
 
     Args:
-        config: GPTNeoXConfig
+        config: GPTNeoXMoEConfig
     """
 
     def __init__(self, config):
@@ -623,9 +627,9 @@ class GPTNeoXModel(GPTNeoXPreTrainedModel):
 
         self.embed_in = nn.Embedding(config.vocab_size, config.hidden_size)
         self.emb_dropout = nn.Dropout(config.hidden_dropout)
-        self.layers = nn.ModuleList([GPTNeoXLayer(config, i) for i in range(config.num_hidden_layers)])
+        self.layers = nn.ModuleList([GPTNeoXMoELayer(config, i) for i in range(config.num_hidden_layers)])
         self.final_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.rotary_emb = GPTNeoXRotaryEmbedding(config=config)
+        self.rotary_emb = GPTNeoXMoERotaryEmbedding(config=config)
         self.gradient_checkpointing = False
 
         # Initialize weights and apply final processing
@@ -890,9 +894,9 @@ class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs): ...
 
 
 @add_start_docstrings(
-    """GPTNeoX Model with a `language modeling` head on top for CLM fine-tuning.""", GPT_NEOX_START_DOCSTRING
+    """GPTNeoXMoE Model with a `language modeling` head on top for CLM fine-tuning.""", GPT_NEOX_START_DOCSTRING
 )
-class GPTNeoXForCausalLM(GPTNeoXPreTrainedModel, GenerationMixin):
+class GPTNeoXMoEForCausalLM(GPTNeoXMoEPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["embed_out.weight"]
     _tp_plan = {"embed_out": "colwise_rep"}
     _pp_plan = {"embed_out": (["hidden_states"], ["logits"])}
@@ -900,7 +904,7 @@ class GPTNeoXForCausalLM(GPTNeoXPreTrainedModel, GenerationMixin):
     def __init__(self, config):
         super().__init__(config)
 
-        self.gpt_neox = GPTNeoXModel(config)
+        self.gpt_neox = GPTNeoXMoEModel(config)
         self.embed_out = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
@@ -945,13 +949,13 @@ class GPTNeoXForCausalLM(GPTNeoXPreTrainedModel, GenerationMixin):
         Example:
 
         ```python
-        >>> from transformers import AutoTokenizer, GPTNeoXForCausalLM, GPTNeoXConfig
+        >>> from transformers import AutoTokenizer, GPTNeoXMoEForCausalLM, GPTNeoXMoEConfig
         >>> import torch
 
         >>> tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
-        >>> config = GPTNeoXConfig.from_pretrained("EleutherAI/gpt-neox-20b")
+        >>> config = GPTNeoXMoEConfig.from_pretrained("EleutherAI/gpt-neox-20b")
         >>> config.is_decoder = True
-        >>> model = GPTNeoXForCausalLM.from_pretrained("EleutherAI/gpt-neox-20b", config=config)
+        >>> model = GPTNeoXMoEForCausalLM.from_pretrained("EleutherAI/gpt-neox-20b", config=config)
 
         >>> inputs = tokenizer("Hello, my dog is cute", return_tensors="pt")
         >>> outputs = model(**inputs)
@@ -999,9 +1003,9 @@ class GPTNeoXForCausalLM(GPTNeoXPreTrainedModel, GenerationMixin):
 
 @add_start_docstrings(
     """
-    The GPTNeoX Model transformer with a sequence classification head on top (linear layer).
+    The GPTNeoXMoE Model transformer with a sequence classification head on top (linear layer).
 
-    [`GPTNeoXForSequenceClassification`] uses the last token in order to do the classification, as other causal models
+    [`GPTNeoXMoEForSequenceClassification`] uses the last token in order to do the classification, as other causal models
     (e.g. GPT-1) do.
 
     Since it does classification on the last token, it requires to know the position of the last token. If a
@@ -1012,11 +1016,11 @@ class GPTNeoXForCausalLM(GPTNeoXPreTrainedModel, GenerationMixin):
     """,
     GPT_NEOX_START_DOCSTRING,
 )
-class GPTNeoXForSequenceClassification(GPTNeoXPreTrainedModel):
+class GPTNeoXMoEForSequenceClassification(GPTNeoXMoEPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.gpt_neox = GPTNeoXModel(config)
+        self.gpt_neox = GPTNeoXMoEModel(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 
         # Initialize weights and apply final processing
@@ -1101,12 +1105,12 @@ class GPTNeoXForSequenceClassification(GPTNeoXPreTrainedModel):
         )
 
 
-class GPTNeoXForTokenClassification(GPTNeoXPreTrainedModel):
+class GPTNeoXMoEForTokenClassification(GPTNeoXMoEPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
 
-        self.gpt_neox = GPTNeoXModel(config)
+        self.gpt_neox = GPTNeoXMoEModel(config)
         self.dropout = nn.Dropout(config.classifier_dropout)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
@@ -1183,11 +1187,11 @@ class GPTNeoXForTokenClassification(GPTNeoXPreTrainedModel):
     """,
     GPT_NEOX_START_DOCSTRING,
 )
-class GPTNeoXForQuestionAnswering(GPTNeoXPreTrainedModel):
+class GPTNeoXMoEForQuestionAnswering(GPTNeoXMoEPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.gpt_neox = GPTNeoXModel(config)
+        self.gpt_neox = GPTNeoXMoEModel(config)
         self.qa_outputs = nn.Linear(config.hidden_size, 2)
 
         # Initialize weights and apply final processing
@@ -1262,11 +1266,11 @@ class GPTNeoXForQuestionAnswering(GPTNeoXPreTrainedModel):
 
 
 __all__ = [
-    "GPTNeoXForCausalLM",
-    "GPTNeoXForQuestionAnswering",
-    "GPTNeoXForSequenceClassification",
-    "GPTNeoXForTokenClassification",
-    "GPTNeoXLayer",
-    "GPTNeoXModel",
-    "GPTNeoXPreTrainedModel",
+    "GPTNeoXMoEForCausalLM",
+    "GPTNeoXMoEForQuestionAnswering",
+    "GPTNeoXMoEForSequenceClassification",
+    "GPTNeoXMoEForTokenClassification",
+    "GPTNeoXMoELayer",
+    "GPTNeoXMoEModel",
+    "GPTNeoXMoEPreTrainedModel",
 ]

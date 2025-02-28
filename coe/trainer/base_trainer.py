@@ -198,6 +198,8 @@ class BaseTrainer(FSDPSFTTrainer):
                                                                                torch_dtype=torch.float32,
                                                                                attn_implementation='flash_attention_2',
                                                                                trust_remote_code=trust_remote_code)
+                
+            print("MODEL TOTAL PARAMS:", sum(p.numel() for p in self.model.parameters()))
 
             # Apply Liger kernel if use_liger is enabled
             if self.config.model.get('use_liger', False):
@@ -221,7 +223,7 @@ class BaseTrainer(FSDPSFTTrainer):
 
         log_gpu_memory_usage('After model allocation', logger=logger)
 
-        mixed_precision = MixedPrecision(param_dtype=torch.bfloat16,
+        mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, # simple
                                          reduce_dtype=torch.float32,
                                          buffer_dtype=torch.float32)
 

@@ -12,21 +12,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""GPTNeoX model configuration"""
+"""GPTNeoXMoE model configuration"""
 
-from ...configuration_utils import PretrainedConfig
-from ...modeling_rope_utils import rope_config_validation
-from ...utils import logging
+from transformers.configuration_utils import PretrainedConfig
+from transformers.modeling_rope_utils import rope_config_validation
+from transformers.utils import logging
 
 
 logger = logging.get_logger(__name__)
 
 
-class GPTNeoXConfig(PretrainedConfig):
+class GPTNeoXMoEConfig(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`GPTNeoXModel`]. It is used to instantiate an
-    GPTNeoX model according to the specified arguments, defining the model architecture. Instantiating a configuration
-    with the defaults will yield a similar configuration to that of the GPTNeoX
+    This is the configuration class to store the configuration of a [`GPTNeoXMoEModel`]. It is used to instantiate an
+    GPTNeoXMoE model according to the specified arguments, defining the model architecture. Instantiating a configuration
+    with the defaults will yield a similar configuration to that of the GPTNeoXMoE
     [EleutherAI/gpt-neox-20b](https://huggingface.co/EleutherAI/gpt-neox-20b) architecture.
 
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
@@ -35,8 +35,8 @@ class GPTNeoXConfig(PretrainedConfig):
 
     Args:
         vocab_size (`int`, *optional*, defaults to 50432):
-            Vocabulary size of the GPTNeoX model. Defines the number of different tokens that can be represented by the
-            `inputs_ids` passed when calling [`GPTNeoXModel`].
+            Vocabulary size of the GPTNeoXMoE model. Defines the number of different tokens that can be represented by the
+            `inputs_ids` passed when calling [`GPTNeoXMoEModel`].
         hidden_size (`int`, *optional*, defaults to 6144):
             Dimension of the encoder layers and the pooler layer.
         num_hidden_layers (`int`, *optional*, defaults to 44):
@@ -58,7 +58,7 @@ class GPTNeoXConfig(PretrainedConfig):
             The dropout ratio of (1) the word embeddings, (2) the post-attention hidden states, and (3) the post-mlp
             hidden states.
         classifier_dropout (`float`, *optional*, defaults to 0.1):
-            Argument used when doing token classification, used in the model [`GPTNeoXForTokenClassification`].
+            Argument used when doing token classification, used in the model [`GPTNeoXMoEForTokenClassification`].
 
             The dropout ratio for the hidden layer.
         max_position_embeddings (`int`, *optional*, defaults to 2048):
@@ -117,13 +117,13 @@ class GPTNeoXConfig(PretrainedConfig):
         Example:
 
     ```python
-    >>> from transformers import GPTNeoXConfig, GPTNeoXModel
+    >>> from transformers import GPTNeoXMoEConfig, GPTNeoXMoEModel
 
-    >>> # Initializing a GPTNeoX gpt-neox-20b style configuration
-    >>> configuration = GPTNeoXConfig()
+    >>> # Initializing a GPTNeoXMoE gpt-neox-20b style configuration
+    >>> configuration = GPTNeoXMoEConfig()
 
     >>> # Initializing a model (with random weights) from the gpt-neox-20b style configuration
-    >>> model = GPTNeoXModel(configuration)  # doctest: +SKIP
+    >>> model = GPTNeoXMoEModel(configuration)  # doctest: +SKIP
 
     >>> # Accessing the model configuration
     >>> configuration = model.config  # doctest: +SKIP
@@ -157,7 +157,7 @@ class GPTNeoXConfig(PretrainedConfig):
         attention_bias=True,
         moe_sparsity=1,
         moe_granularity=1,
-        layer_recur_n=1
+        layer_recur_n=1,
         **kwargs,
     ):
         super().__init__(bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
