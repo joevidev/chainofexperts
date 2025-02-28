@@ -169,6 +169,11 @@ class BaseTrainer(FSDPSFTTrainer):
         trust_remote_code = self.config.model.trust_remote_code
         # load config first
         config = AutoConfig.from_pretrained(local_model_path, trust_remote_code=trust_remote_code)
+        
+        # override config if necessary
+        for key, value in self.config.model.override_config.items():
+            setattr(config, key, value)
+        
         if self.config.ulysses_sequence_parallel_size > 1:
             assert self.use_remove_padding, "Sequence parallel is only supported when remove_padding is enabled"
             from verl.models.registry import check_model_support_rmpad

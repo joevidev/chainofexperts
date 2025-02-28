@@ -13,13 +13,16 @@ set -x
 
 torchrun main.py \
     trainer.project_name=gsm8k-sft \
-    trainer.experiment_name=gsm8k-sft-pythia-14m-test-rand \
+    trainer.experiment_name=gsm8k-sft-pythia-14m-test-rand-spa8gra2 \
     data.train_files=data/gsm8k/train.parquet \
     data.val_files=data/gsm8k/test.parquet \
     +data.text_keys=['question','answer'] \
     data.micro_batch_size_per_gpu=4 \
-    model.partial_pretrain=EleutherAI/pythia-14m \
+    model.partial_pretrain=config/models/pythia-14m \
     +model.from_config=true \
+    +model.override_config.moe_sparsity=8 \
+    +model.override_config.moe_granularity=2 \
+    +model.override_config.moe_topk=2 \
     trainer.default_local_dir=output \
     trainer.total_epochs=2 \
     trainer.logger=['console','wandb'] \

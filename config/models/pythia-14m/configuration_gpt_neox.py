@@ -155,6 +155,9 @@ class GPTNeoXConfig(PretrainedConfig):
         use_parallel_residual=True,
         rope_scaling=None,
         attention_bias=True,
+        moe_sparsity=1,
+        moe_granularity=1,
+        layer_recur_n=1
         **kwargs,
     ):
         super().__init__(bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
@@ -179,6 +182,10 @@ class GPTNeoXConfig(PretrainedConfig):
         self.use_parallel_residual = use_parallel_residual
         self.rope_scaling = rope_scaling
         self.attention_bias = attention_bias
+        self.moe_sparsity = 1
+        self.moe_granularity = 1
+        self.moe_topk = 1
+        self.layer_recur_n = 1
         # Validate the correctness of rotary position embeddings parameters
         # BC: if there is a 'type' field, move it to 'rope_type'.
         if self.rope_scaling is not None and "type" in self.rope_scaling:

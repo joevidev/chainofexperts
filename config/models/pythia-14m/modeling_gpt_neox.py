@@ -43,17 +43,152 @@ _CONFIG_FOR_DOC = "GPTNeoXConfig"
 
 
 class GPTNeoXMLP(nn.Module):
+    """
+    MoE extension of GPTNeoXMLP with configurable sparsity and granularity
+    
+    Args:
+        config: Configuration object with the following properties:
+            - hidden_size: Size of the hidden layers
+            - intermediate_size: Size of the intermediate layers
+            - hidden_act: Activation function
+            - moe_sparsity: Number of expert groups (default: 1)
+            - moe_granularity: Number of experts per group and number to select (default: 1)
+    """
     def __init__(self, config):
-        super().__init__()
-        self.dense_h_to_4h = nn.Linear(config.hidden_size, config.intermediate_size)
-        self.dense_4h_to_h = nn.Linear(config.intermediate_size, config.hidden_size)
+        nn.Module.__init__(self)  # Skip GPTMLP init, we'll handle it differently
+        
+        self.config = config
+        self.hidden_size = config.hidden_size
+        self.intermediate_size = config.intermediate_size
+        
+        # Get MoE configuration parameters
+        self.sparsity = getattr(config, "moe_sparsity", 1)
+        self.granularity = getattr(config, "moe_granularity", 1)
+        self.topk = getattr(config, "moe_topk", self.granularity)
+        
+        # Calculate derived parameters
+        self.num_experts = self.sparsity * self.granularity
+        self.expert_size = self.intermediate_size // self.granularity
+        
+        # If both parameters are 1, this is just a regular MLP
+        if self.sparsity == 1 and self.granularity == 1:
+            self.is_moe = False
+            self.dense_h_to_4h = nn.Linear(config.hidden_size, config.intermediate_size)
+            self.dense_4h_to_h = nn.Linear(config.intermediate_size, config.hidden_size)
+        else:
+            self.is_moe = True
+            # Create router for expert selection
+            self.router = nn.Linear(self.hidden_size, self.num_experts, bias=False)
+            
+            # Create experts - each expert has a smaller intermediate size
+            self.h_to_4h_experts = nn.ModuleList([
+                nn.Linear(self.hidden_size, self.expert_size)
+                for _ in range(self.num_experts)
+            ])
+            
+            self.h_to_4h_experts_4h_to_h = nn.ModuleList([
+                nn.Linear(self.expert_size, self.hidden_size)
+                for _ in range(self.num_experts)
+            ])
+        
         self.act = ACT2FN[config.hidden_act]
 
     def forward(self, hidden_states):
-        hidden_states = self.dense_h_to_4h(hidden_states)
-        hidden_states = self.act(hidden_states)
-        hidden_states = self.dense_4h_to_h(hidden_states)
-        return hidden_states
+        # If not using MoE, fallback to standard MLP behavior
+        if not self.is_moe:
+            return super().forward(hidden_states)
+        
+        # Store original shape
+        original_shape = hidden_states.shape
+        batch_size, seq_len, hidden_dim = original_shape
+        
+        # Reshape for routing
+        hidden_states_2d = hidden_states.view(-1, self.hidden_size)
+        
+        # Calculate routing probabilities
+        router_logits = self.router(hidden_states_2d)
+        routing_weights = F.sigmoid(router_logits)
+        routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
+        
+        # Select top-k experts
+        topk_weights, topk_idx = torch.topk(
+            routing_weights, 
+            k=self.topk,
+            dim=-1
+        )
+        
+        # Normalize the weights
+        topk_weights = topk_weights / (topk_weights.sum(dim=-1, keepdim=True) + 1e-20)
+        
+        # For inference, use the efficient implementation
+        if not self.training:
+            return self.moe_infer(hidden_states, topk_idx, topk_weights).view(orig_shape)
+        
+        # For training, use the straightforward implementation
+        hidden_states = hidden_states.repeat_interleave(
+            self.topk, dim=0
+        )
+        flat_topk_idx = topk_idx.view(-1)
+        
+        y = torch.empty_like(hidden_states)
+        for i, expert in enumerate(self.experts):
+            mask = flat_topk_idx == i
+            if mask.any():
+                y[mask] = expert(hidden_states[mask])
+        
+        y = (y.view(*topk_weights.shape, -1) * topk_weights.unsqueeze(-1)).sum(dim=1)
+        return y.view(orig_shape)
+
+    @torch.no_grad()
+    def moe_infer(self, x, topk_idx, topk_weights):
+        # Count tokens per expert
+        counts = torch.zeros(topk_idx.shape[0], self.num_experts, device=topk_idx.device, dtype=torch.int32)
+        counts.scatter_(1, topk_idx, 1)
+        tokens_per_expert = counts.sum(dim=0)
+        
+        # Sort tokens by expert assignment for batch processing
+        flat_topk_idx = topk_idx.view(-1)
+        sort_indices = flat_topk_idx.argsort()
+        sorted_tokens = x[sort_indices // topk_idx.shape[1]]
+        
+        # Process tokens expert by expert
+        outputs = []
+        start_idx = 0
+        for i, num_tokens in enumerate(tokens_per_expert):
+            num_tokens = num_tokens.item()
+            if num_tokens == 0:
+                continue
+                
+            end_idx = start_idx + num_tokens
+            expert = self.experts[i]
+            tokens_for_expert = sorted_tokens[start_idx:end_idx]
+            expert_out = expert(tokens_for_expert)
+            outputs.append(expert_out)
+            start_idx = end_idx
+        
+        # If no tokens were processed, return empty tensor
+        if not outputs:
+            return x.new_zeros(x.shape)
+            
+        # Combine expert outputs
+        expert_outputs = torch.cat(outputs, dim=0)
+        
+        # Create inverse mapping to restore original order
+        inverse_indices = torch.empty_like(sort_indices)
+        inverse_indices[sort_indices] = torch.arange(sort_indices.size(0), device=sort_indices.device)
+        
+        # Reorder outputs to match input order
+        reordered_outputs = torch.empty_like(expert_outputs)
+        reordered_outputs[inverse_indices] = expert_outputs
+        
+        # Apply weights and sum for each token
+        final_output = (
+            reordered_outputs.view(*topk_idx.shape, -1)
+            .mul(topk_weights.unsqueeze(-1))
+            .sum(dim=1)
+        )
+        
+        return final_output
 
 
 def rotate_half(x):
