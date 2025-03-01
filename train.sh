@@ -23,8 +23,9 @@ base_args=(
     "+data.text_keys=['query','response']"
     "data.micro_batch_size_per_gpu=2"
     "data.train_batch_size=32"
-    "model.partial_pretrain=config/models/dsv2"
+    "model.partial_pretrain=config/models/qwen-moe"
     "+model.from_config=true"
+    "+model.override_config._attn_implementation=flash_attention_2"
     "trainer.default_local_dir=output"
     "trainer.total_epochs=null"
     "trainer.total_training_steps=1000"
@@ -48,11 +49,7 @@ for config in "${configs[@]}"; do
     done
     
     # Add configuration-specific parameters
-    cmd+=" trainer.experiment_name=metamathqa-sft-coe-tiny-hf-v2-$suffix"
-    cmd+=" +model.override_config.n_shared_experts=$n_shared_experts"
-    cmd+=" +model.override_config.n_routed_experts=$n_routed_experts"
-    cmd+=" +model.override_config.num_experts_per_tok=$num_experts_per_tok"
-    cmd+=" +model.override_config.inner_iter=$inner_iter"
+    cmd+=" trainer.experiment_name=metamathqa-dsmoe-$suffix"
     cmd+=" +model.override_config.num_hidden_layers=$num_hidden_layers"
 
 
@@ -60,7 +57,7 @@ for config in "${configs[@]}"; do
     cmd+=" $@"
     
     # Execute command
-    echo "Running experiment: metamathqa-sft-coe-tiny-hf-v2-$suffix"
+    echo "Running experiment: metamathqa-dsmoe-$suffix"
     eval $cmd
     
     # Optional: Add a pause between experiments

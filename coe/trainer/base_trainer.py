@@ -111,12 +111,12 @@ class BaseTrainer(FSDPSFTTrainer):
         if self.config.model.from_config:
             model: PreTrainedModel = AutoModelForCausalLM.from_config(config, 
                                                                             torch_dtype=torch.float32,
-                                                                            attn_implementation='flash_attention_2',
+                                                                            attn_implementation=config._attn_implementation,
                                                                             trust_remote_code=trust_remote_code)
         else:
             model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(local_model_path, 
                                                                             torch_dtype=torch.float32,
-                                                                            attn_implementation='flash_attention_2',
+                                                                            attn_implementation=config._attn_implementation,
                                                                             trust_remote_code=trust_remote_code)
             
         print("MODEL TOTAL PARAMS:", sum(p.numel() for p in model.parameters()))
