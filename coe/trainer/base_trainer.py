@@ -189,6 +189,7 @@ class BaseTrainer(FSDPSFTTrainer):
         # Final checkpoint
         self.save_checkpoint(step=global_step)
 
+
     def training_step(self, batch: TensorDict):
         rank = self.device_mesh.get_rank()
 
@@ -204,10 +205,11 @@ class BaseTrainer(FSDPSFTTrainer):
         n_micro_batches = len(micro_batches)
         step_loss = 0
         for micro_batch in micro_batches:
-            loss = self._compute_loss_and_backward(batch=micro_batch) / n_micro_batches
+            loss = self._compute_loss_and_backward(batch=micro_batch, do_backward=False) / n_micro_batches
+            loss.backward()
             step_loss += loss.item()
+            grad_norm = self.fsdp_model.clip_grad_norm_(max_norm=self.config.optim.clip_grad)
 
-        grad_norm = self.fsdp_model.clip_grad_norm_(max_norm=self.config.optim.clip_grad)
 
         log_gpu_memory_usage('Before optimizer step', logger=logger)
 

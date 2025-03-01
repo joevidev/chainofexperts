@@ -257,11 +257,13 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
 
 # Copied from transformers.models.olmo.modeling_olmo.OlmoMLP with Olmo->Olmoe
 class OlmoeMLP(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, hidden_size=None, intermediate_size=None):
         super().__init__()
         self.config = config
-        self.hidden_size = config.hidden_size
-        self.intermediate_size = config.intermediate_size
+        self.hidden_size = config.hidden_size if hidden_size is None else hidden_size
+        self.intermediate_size = (
+            config.intermediate_size if intermediate_size is None else intermediate_size
+        )
         self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
@@ -656,7 +658,12 @@ class OlmoeDecoderLayer(nn.Module):
 
         self.self_attn = OLMOE_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
 
-        self.mlp = OlmoeSparseMoeBlock(config)
+        if config.num_experts_per_tok != config.num_experts:
+            self.use_moe = True
+            self.mlp = OlmoeSparseMoeBlock(config)
+        else:
+            self.use_moe = False
+            self.mlp = OlmoeMLP(config, intermediate_size=config.num_experts * config.intermediate_size)
         self.input_layernorm = OlmoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = OlmoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.inner_iter = config.inner_iter
@@ -791,7 +798,13 @@ class OlmoeDecoderLayer(nn.Module):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states, router_logits = self.mlp(hidden_states)
+        mlp_output = self.mlp(hidden_states)
+        if self.use_moe:
+            hidden_states = mlp_output[0]
+            router_logits = mlp_output[1]
+        else:
+            hidden_states = mlp_output
+            router_logits = None
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
