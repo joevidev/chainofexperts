@@ -149,6 +149,8 @@ class BaseTrainer(FSDPSFTTrainer):
         # Get data iterator so we can manually control iterations
         train_iterator = iter(self.train_dataloader)
     
+        wandb.log({"System-core/model_size": sum(p.numel() for p in self.model.parameters()) / (1024 ** 2)}, step=global_step)
+
         epoch = 0
         while global_step < self.total_steps:
             try:
