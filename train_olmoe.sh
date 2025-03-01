@@ -5,41 +5,40 @@ export PYTHONPATH=/home/zihan/CoE:$PYTHONPATH
 
 # Define configuration combinations
 # Format: experiment_suffix:sparsity:granularity:topk
-general_name="mmqa-olmoe_coe-h1024-badgradnorm"
+general_name="mmqa-olmoe_coe-h1024"
 configs=(
+    # Dense: 2 layers of 8→8, has done
     "8epts-8topk-1iter-4lyr:8:8:1:4"
-    # # Dense: 2 layers of 8→8, has done
-    # "8epts-8topk-1iter-4lyr:8:8:1:4"
-    # # Dense Recurrent: 1 layer of 8→8, 2 iterations
-    # "8epts-8topk-2iter-4lyr:8:8:2:4"
-    # # Baseline: 2 layers of 64→8, has done
-    # "64epts-8topk-1iter-4lyr:64:8:1:4"
-    # # Your approach: 1 layer of 64→8, 2 iterations
-    # "64epts-8topk-2iter-4lyr:64:8:2:4"
-    # # Compute-matched version with more experts
-    # "128epts-8topk-2iter-4lyr:128:8:2:4"
+    # Dense Recurrent: 1 layer of 8→8, 2 iterations
+    "8epts-8topk-2iter-4lyr:8:8:2:4"
+    # Baseline: 2 layers of 64→8, has done
+    "64epts-8topk-1iter-4lyr:64:8:1:4"
+    # Your approach: 1 layer of 64→8, 2 iterations
+    "64epts-8topk-2iter-4lyr:64:8:2:4"
+    # Compute-matched version with more experts
+    "128epts-8topk-2iter-4lyr:128:8:2:4"
 
-    # # "64epts-8topk-1iter-16lyr:64:8:1:16"
-    # # Memory-matched experiments (64 experts → 8 selected)
-    # "64epts-8topk-1iter-8lyr:64:8:1:8"
-    # "64epts-8topk-1iter-12lyr:64:8:1:12"
     # "64epts-8topk-1iter-16lyr:64:8:1:16"
+    # Memory-matched experiments (64 experts → 8 selected)
+    "64epts-8topk-1iter-8lyr:64:8:1:8"
+    "64epts-8topk-1iter-12lyr:64:8:1:12"
+    "64epts-8topk-1iter-16lyr:64:8:1:16"
     
-    # # # # Memory-matched experiments (8 experts → 8 selected, dense)
-    # "8epts-8topk-1iter-8lyr:8:8:1:8"
-    # "8epts-8topk-1iter-12lyr:8:8:1:12"
-    # "8epts-8topk-1iter-16lyr:8:8:1:16"
+    # # # Memory-matched experiments (8 experts → 8 selected, dense)
+    "8epts-8topk-1iter-8lyr:8:8:1:8"
+    "8epts-8topk-1iter-12lyr:8:8:1:12"
+    "8epts-8topk-1iter-16lyr:8:8:1:16"
 
-    # # Your approach with increasing iterations
-    # "64epts-8topk-1iter-4lyr:64:8:1:4"
-    # "8epts-8topk-1iter-4lyr:8:8:1:4"
-    # "64epts-8topk-2iter-4lyr:64:8:2:4"
-    # "8epts-8topk-2iter-4lyr:8:8:2:4"
-    # "64epts-8topk-4iter-4lyr:64:8:4:4"
-    # "8epts-8topk-4iter-4lyr:8:8:4:4"
-    # "64epts-8topk-8iter-4lyr:64:8:8:4"
-    # "8epts-8topk-8iter-4lyr:8:8:8:4"
-    # # Dense Recurrent with increasing iterations (for comparison)
+    # Your approach with increasing iterations
+    "64epts-8topk-1iter-4lyr:64:8:1:4"
+    "8epts-8topk-1iter-4lyr:8:8:1:4"
+    "64epts-8topk-2iter-4lyr:64:8:2:4"
+    "8epts-8topk-2iter-4lyr:8:8:2:4"
+    "64epts-8topk-4iter-4lyr:64:8:4:4"
+    "8epts-8topk-4iter-4lyr:8:8:4:4"
+    "64epts-8topk-8iter-4lyr:64:8:8:4"
+    "8epts-8topk-8iter-4lyr:8:8:8:4"
+    # Dense Recurrent with increasing iterations (for comparison)
 )
 
 
