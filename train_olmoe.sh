@@ -40,7 +40,7 @@ configs=(
     "64epts-8topk-12iter-1lyr:64:8:12:1"
     "64epts-8topk-16iter-1lyr:64:8:16:1"
     
-    Dense Recurrent with increasing iterations (for comparison)
+    # Dense Recurrent with increasing iterations (for comparison)
     "8epts-8topk-1iter-1lyr:8:8:1:1"
     "8epts-8topk-2iter-1lyr:8:8:2:1"
     "8epts-8topk-4iter-1lyr:8:8:4:1"
