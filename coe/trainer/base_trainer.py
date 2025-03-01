@@ -149,9 +149,11 @@ class BaseTrainer(FSDPSFTTrainer):
         # Get data iterator so we can manually control iterations
         train_iterator = iter(self.train_dataloader)
     
-        wandb.log({"System-core/model_size": sum(p.numel() for p in self.model.parameters()) / (1024 ** 2)}, step=global_step)
+
+        wandb.log({"System-core/non_emb_params": sum(p.numel() for p in self.model.model.layers.parameters()) / (1024 ** 2)}, step=global_step)
 
         epoch = 0
+        start_time = time.time()
         while global_step < self.total_steps:
             try:
                 data = next(train_iterator)
@@ -169,7 +171,7 @@ class BaseTrainer(FSDPSFTTrainer):
             if rank == 0:
                 tracking.log(data=metric, step=global_step)
                 wandb.log(get_gpu_memory_usage(rank=0), step=global_step) # only log rank 0, assume all ranks have the same memory usage
-                wandb.log({"System-core/time": time.time()}, step=global_step)
+                wandb.log({"System-core/time": time.time() - start_time}, step=global_step)
             global_step += 1
             
             # Run validation if needed
@@ -186,6 +188,43 @@ class BaseTrainer(FSDPSFTTrainer):
         
         # Final checkpoint
         self.save_checkpoint(step=global_step)
+
+    def training_step(self, batch: TensorDict):
+        rank = self.device_mesh.get_rank()
+
+        self.fsdp_model.train()
+
+        log_gpu_memory_usage('Before optimizer zero_grad', logger=logger)
+
+        self.optimizer.zero_grad()
+
+        log_gpu_memory_usage('After optimizer zero_grad', logger=logger)
+
+        micro_batches = batch.split(self.config.data.micro_batch_size_per_gpu)
+        n_micro_batches = len(micro_batches)
+        step_loss = 0
+        for micro_batch in micro_batches:
+            loss = self._compute_loss_and_backward(batch=micro_batch) / n_micro_batches
+            step_loss += loss.item()
+
+        grad_norm = self.fsdp_model.clip_grad_norm_(max_norm=self.config.optim.clip_grad)
+
+        log_gpu_memory_usage('Before optimizer step', logger=logger)
+
+        self.optimizer.step()
+
+        log_gpu_memory_usage('After optimizer step', logger=logger)
+
+        self.lr_scheduler.step()
+
+        # reduce loss across dp ranks
+        lr = self.lr_scheduler.get_last_lr()[0]
+
+        log_gpu_memory_usage('After offload weights', logger=logger)
+
+        step_loss = torch.tensor(step_loss).cuda()
+        torch.distributed.all_reduce(step_loss, op=torch.distributed.ReduceOp.AVG)
+        return {'train/loss': step_loss.detach().item(), 'train/lr(1e-3)': lr * 1e3, 'train/grad_norm': grad_norm}
 
     def _run_validation(self, global_step, rank, tracking):
         """Helper method to run validation"""
