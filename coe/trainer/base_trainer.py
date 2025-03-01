@@ -120,6 +120,7 @@ class BaseTrainer(FSDPSFTTrainer):
                                                                             trust_remote_code=trust_remote_code)
             
         print("MODEL TOTAL PARAMS:", sum(p.numel() for p in model.parameters()))
+        print(model)
         return model
     
     def fit(self):

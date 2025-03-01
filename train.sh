@@ -6,11 +6,12 @@ export PYTHONPATH=/home/zihan/CoE:$PYTHONPATH
 # Define configuration combinations
 # Format: experiment_suffix:sparsity:granularity:topk
 configs=(
-    # "sparse2:2:1:1"    # 2 experts, granularity 1, topk 1
-    # "sparse4:4:1:1"    # 4 experts, granularity 1, topk 1
-    # "sparse1:1:1:1"    # Original pythia-160m (no MoE)
-    # "sparse4gra2:4:2:1"  # 4 experts, granularity 2, topk 1
-    # "sparse4gra4:4:4:1"  # 4 experts, granularity 4, topk 1
+    # "main-6lyr:2:64:6:1:6"
+    # "main-5lyr:2:64:6:1:5"
+    # "main-4lyr:2:64:6:1:4"
+    # "main-3lyr:2:64:6:1:3"
+    # "main-2lyr:2:64:6:1:2"
+    "main-1lyr:2:64:6:1:1"
 )
 
 # Base command line arguments common to all runs
@@ -20,9 +21,9 @@ base_args=(
     "data.val_files=data/metamathqa/test.parquet"
     "data.truncation=right"
     "+data.text_keys=['query','response']"
-    "data.micro_batch_size_per_gpu=8"
+    "data.micro_batch_size_per_gpu=2"
     "data.train_batch_size=32"
-    "model.partial_pretrain=config/models/pythia-dsmoe-160m"
+    "model.partial_pretrain=config/models/dsv2"
     "+model.from_config=true"
     "trainer.default_local_dir=output"
     "trainer.total_epochs=null"
@@ -36,7 +37,7 @@ base_args=(
 # Run each configuration
 for config in "${configs[@]}"; do
     # Parse configuration
-    IFS=':' read -r suffix sparsity granularity topk <<< "$config"
+    IFS=':' read -r suffix n_shared_experts n_routed_experts num_experts_per_tok inner_iter num_hidden_layers <<< "$config"
     
     # Build command
     cmd="torchrun main.py"
@@ -47,16 +48,19 @@ for config in "${configs[@]}"; do
     done
     
     # Add configuration-specific parameters
-    cmd+=" trainer.experiment_name=metamathqa-sft-pythia-160m-$suffix"
-    cmd+=" +model.override_config.moe_sparsity=$sparsity"
-    cmd+=" +model.override_config.moe_granularity=$granularity"
-    cmd+=" +model.override_config.moe_topk=$topk"
-    
+    cmd+=" trainer.experiment_name=metamathqa-sft-coe-tiny-hf-v2-$suffix"
+    cmd+=" +model.override_config.n_shared_experts=$n_shared_experts"
+    cmd+=" +model.override_config.n_routed_experts=$n_routed_experts"
+    cmd+=" +model.override_config.num_experts_per_tok=$num_experts_per_tok"
+    cmd+=" +model.override_config.inner_iter=$inner_iter"
+    cmd+=" +model.override_config.num_hidden_layers=$num_hidden_layers"
+
+
     # Add any additional arguments passed to this script
     cmd+=" $@"
     
     # Execute command
-    echo "Running experiment: metamathqa-sft-pythia-160m-$suffix"
+    echo "Running experiment: metamathqa-sft-coe-tiny-hf-v2-$suffix"
     eval $cmd
     
     # Optional: Add a pause between experiments
