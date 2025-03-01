@@ -1,107 +1,62 @@
-set -x
-
-# if [ "$#" -lt 1 ]; then
-#     echo "Usage: run_gemma_2b.sh <save_path> [other_configs...]"
-#     exit 1
-# fi
-
-# save_path=$1
-
-# Shift the arguments so $@ refers to the rest
-# shift 2
+#!/bin/bash
+set -x  # Print each command before execution
 
 export PYTHONPATH=/home/zihan/CoE:$PYTHONPATH
 
-# torchrun main.py \
-#     trainer.project_name=metamathqa-sft \
-#     trainer.experiment_name=metamathqa-sft-pythia-160m-sparse2 \
-#     data.train_files=data/metamathqa/train.parquet \
-#     data.val_files=data/metamathqa/test.parquet \
-#     data.truncation=left \
-#     +data.text_keys=['query','response'] \
-#     data.micro_batch_size_per_gpu=4 \
-#     model.partial_pretrain=config/models/pythia-160m \
-#     +model.from_config=true \
-#     +model.override_config.moe_sparsity=2 \
-#     +model.override_config.moe_granularity=1 \
-#     +model.override_config.moe_topk=1 \
-#     trainer.default_local_dir=output \
-#     trainer.total_epochs=1 \
-#     trainer.logger=['console','wandb'] \
-#     trainer.default_hdfs_dir=null $@
+# Define configuration combinations
+# Format: experiment_suffix:sparsity:granularity:topk
+configs=(
+    "sparse2:2:1:1"    # 2 experts, granularity 1, topk 1
+    # "sparse4:4:1:1"    # 4 experts, granularity 1, topk 1
+    # "sparse1:1:1:1"    # Original pythia-160m (no MoE)
+    # "sparse4gra2:4:2:1"  # 4 experts, granularity 2, topk 1
+    # "sparse4gra4:4:4:1"  # 4 experts, granularity 4, topk 1
+)
 
+# Base command line arguments common to all runs
+base_args=(
+    "trainer.project_name=metamathqa-sft"
+    "data.train_files=data/metamathqa/train.parquet"
+    "data.val_files=data/metamathqa/test.parquet"
+    "data.truncation=left"
+    "+data.text_keys=['query','response']"
+    "data.micro_batch_size_per_gpu=8"
+    "data.train_batch_size=32"
+    "model.partial_pretrain=config/models/pythia-dsmoe-160m"
+    "+model.from_config=true"
+    "trainer.default_local_dir=output"
+    "trainer.total_epochs=1"
+    "trainer.logger=['console','wandb']"
+    "trainer.default_hdfs_dir=null"
+)
 
-# torchrun main.py \
-#     trainer.project_name=metamathqa-sft \
-#     trainer.experiment_name=metamathqa-sft-pythia-160m-sparse4 \
-#     data.train_files=data/metamathqa/train.parquet \
-#     data.val_files=data/metamathqa/test.parquet \
-#     data.truncation=left \
-#     +data.text_keys=['query','response'] \
-#     data.micro_batch_size_per_gpu=4 \
-#     model.partial_pretrain=config/models/pythia-160m \
-#     +model.from_config=true \
-#     +model.override_config.moe_sparsity=4 \
-#     +model.override_config.moe_granularity=1 \
-#     +model.override_config.moe_topk=1 \
-#     trainer.default_local_dir=output \
-#     trainer.total_epochs=1 \
-#     trainer.logger=['console','wandb'] \
-#     trainer.default_hdfs_dir=null $@
-
-
-torchrun main.py \
-    trainer.project_name=metamathqa-sft \
-    trainer.experiment_name=metamathqa-sft-pythia-160m-sparse4gra2 \
-    data.train_files=data/metamathqa/train.parquet \
-    data.val_files=data/metamathqa/test.parquet \
-    data.truncation=left \
-    +data.text_keys=['query','response'] \
-    data.micro_batch_size_per_gpu=4 \
-    model.partial_pretrain=config/models/pythia-160m \
-    +model.from_config=true \
-    +model.override_config.moe_sparsity=4 \
-    +model.override_config.moe_granularity=2 \
-    +model.override_config.moe_topk=1 \
-    trainer.default_local_dir=output \
-    trainer.total_epochs=1 \
-    trainer.logger=['console','wandb'] \
-    trainer.default_hdfs_dir=null $@
-
-
-torchrun main.py \
-    trainer.project_name=metamathqa-sft \
-    trainer.experiment_name=metamathqa-sft-pythia-160m-sparse4gra4 \
-    data.train_files=data/metamathqa/train.parquet \
-    data.val_files=data/metamathqa/test.parquet \
-    data.truncation=left \
-    +data.text_keys=['query','response'] \
-    data.micro_batch_size_per_gpu=4 \
-    model.partial_pretrain=config/models/pythia-160m \
-    +model.from_config=true \
-    +model.override_config.moe_sparsity=4 \
-    +model.override_config.moe_granularity=4 \
-    +model.override_config.moe_topk=1 \
-    trainer.default_local_dir=output \
-    trainer.total_epochs=1 \
-    trainer.logger=['console','wandb'] \
-    trainer.default_hdfs_dir=null $@
-
-torchrun main.py \
-    trainer.project_name=metamathqa-sft \
-    trainer.experiment_name=metamathqa-sft-pythia-160m \
-    data.train_files=data/metamathqa/train.parquet \
-    data.val_files=data/metamathqa/test.parquet \
-    data.truncation=left \
-    +data.text_keys=['query','response'] \
-    data.micro_batch_size_per_gpu=4 \
-    model.partial_pretrain=config/models/pythia-160m \
-    +model.from_config=true \
-    +model.override_config.moe_sparsity=1 \
-    +model.override_config.moe_granularity=1 \
-    +model.override_config.moe_topk=1 \
-    trainer.default_local_dir=output \
-    trainer.total_epochs=1 \
-    trainer.logger=['console','wandb'] \
-    trainer.default_hdfs_dir=null $@
-    # +fsdp=false \
+# Run each configuration
+for config in "${configs[@]}"; do
+    # Parse configuration
+    IFS=':' read -r suffix sparsity granularity topk <<< "$config"
+    
+    # Build command
+    cmd="torchrun main.py"
+    
+    # Add base arguments
+    for arg in "${base_args[@]}"; do
+        cmd+=" $arg"
+    done
+    
+    # Add configuration-specific parameters
+    cmd+=" trainer.experiment_name=metamathqa-sft-pythia-160m-$suffix"
+    cmd+=" +model.override_config.moe_sparsity=$sparsity"
+    cmd+=" +model.override_config.moe_granularity=$granularity"
+    cmd+=" +model.override_config.moe_topk=$topk"
+    
+    # Add any additional arguments passed to this script
+    cmd+=" $@"
+    
+    # Execute command
+    echo "Running experiment: metamathqa-sft-pythia-160m-$suffix"
+    eval $cmd
+    
+    # Optional: Add a pause between experiments
+    # echo "Press Enter to continue to the next experiment..."
+    # read
+done

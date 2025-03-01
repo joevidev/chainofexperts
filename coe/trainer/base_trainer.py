@@ -19,7 +19,6 @@ from torch.utils.data import DataLoader, DistributedSampler
 from torch import nn, optim
 from verl.utils.dataset import SFTDataset
 from torch.distributed.device_mesh import DeviceMesh
-from verl.trainer.fsdp_sft_trainer import FSDPSFTTrainer
 from verl.utils.debug import log_gpu_memory_usage
 from verl.utils.fsdp_utils import get_fsdp_wrap_policy, init_fn, get_init_weight_context_manager
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy, CPUOffload
@@ -29,6 +28,7 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv('VERL_SFT_LOGGING_LEVEL', 'WARN'))
 
 from coe.utils.dataset.base_dataset import BaseDataset
+from coe.trainer.fsdp_sft_trainer import FSDPSFTTrainer
 
 # temporary for debugging
 from typing import List, Union
@@ -63,11 +63,12 @@ def convert_to_regular_types(obj):
 
 class BaseTrainer(FSDPSFTTrainer):
 
-    def __init__(self, config, device_mesh: DeviceMesh=None, ulysses_device_mesh: DeviceMesh=None):
+    def __init__(self, config, device_mesh: DeviceMesh=None, ulysses_device_mesh: DeviceMesh=None, dataset_class = BaseDataset):
         if config.get("fsdp", True):
-            super().__init__(config, device_mesh, ulysses_device_mesh)
+            super().__init__(config, device_mesh, ulysses_device_mesh, dataset_class)
         else:
             raise NotImplementedError
+        
             # below is for debugging in single-process manner
             # self.config = config
             # local_model_path = copy_to_local(src=self.config.model.partial_pretrain, verbose=True)
@@ -85,17 +86,17 @@ class BaseTrainer(FSDPSFTTrainer):
             # if self.device_mesh.get_rank() == 0:
             #     print(self.config)
         
-    def _build_dataloader(self):
+    def _build_dataset(self):
         config = self.config
         # build dataset
-        self.train_dataset = BaseDataset(
+        self.train_dataset = self.dataset_class(
             parquet_files=config.data.train_files,
             tokenizer=self.tokenizer,
             text_keys=config.data.text_keys,
             max_length=config.data.max_length,
             truncation=config.data.truncation
         )
-        self.val_dataset = BaseDataset(
+        self.val_dataset = self.dataset_class(
             parquet_files=config.data.val_files,
             tokenizer=self.tokenizer,
             text_keys=config.data.text_keys,
@@ -103,171 +104,19 @@ class BaseTrainer(FSDPSFTTrainer):
             truncation=config.data.truncation
         )
 
-        # Determine rank and world size for data distribution
-        if self.config.ulysses_sequence_parallel_size > 1:
-            rank = self.ulysses_device_mesh.get_local_rank('dp')
-            world_size = self.ulysses_device_mesh.size(0)
-            if self.ulysses_device_mesh.get_rank() == 0:
-                print(f'Using SP rank {rank} and size {world_size} for data distribution')
-                print(f'Each SP rank gets different data, but the same data WITHIN the same rank')
-        else:
-            rank = self.device_mesh.get_rank()
-            world_size = self.device_mesh.size()
-            
-        if self.device_mesh.get_rank() == 0:
-            print(f'Using FSDP rank {rank} and size {world_size} for data distribution')
-
-        # Set up train dataloader with sampler
-        self.train_sampler = DistributedSampler(
-            self.train_dataset,
-            shuffle=True,
-            num_replicas=world_size,
-            rank=rank,
-            drop_last=True
-        )
-        
-        self.train_dataloader = DataLoader(
-            dataset=self.train_dataset,
-            batch_size=config.data.train_batch_size,
-            sampler=self.train_sampler,
-            num_workers=8,
-            pin_memory=True,
-            drop_last=True
-        )
-
-        # Set up validation dataloader with sampler
-        self.val_sampler = DistributedSampler(
-            self.val_dataset,
-            shuffle=True,
-            num_replicas=world_size,
-            rank=rank,
-            drop_last=True
-        )
-        
-        self.val_dataloader = DataLoader(
-            dataset=self.val_dataset,
-            batch_size=config.data.micro_batch_size_per_gpu,
-            sampler=self.val_sampler,
-            num_workers=8,
-            pin_memory=True,
-            drop_last=True
-        )
-
-    def _build_model_optimizer(self):
-        # TODO (zhangchi.usc1992):
-        # 1. support pretrain from random weights
-        # 2. support init directly from sharded weights
-        local_model_path = copy_to_local(src=self.config.model.partial_pretrain, verbose=True)
-
-        if self.config.model.get('external_lib', None) is not None:
-            # This is used to import external_lib into the huggingface systems
-            import importlib
-            importlib.import_module(self.config.model.external_lib)
-
-        log_gpu_memory_usage('Before model allocation', logger=logger)
-
-        trust_remote_code = self.config.model.trust_remote_code
-        # load config first
-        config = AutoConfig.from_pretrained(local_model_path, trust_remote_code=trust_remote_code)
-        
-        # override config if necessary
+    def _get_model(self, local_model_path, config, trust_remote_code):
         for key, value in self.config.model.override_config.items():
             setattr(config, key, value)
-        
-        if self.config.ulysses_sequence_parallel_size > 1:
-            assert self.use_remove_padding, "Sequence parallel is only supported when remove_padding is enabled"
-            from verl.models.registry import check_model_support_rmpad
-            check_model_support_rmpad(config.model_type)
-
-        if self.use_remove_padding and self.config.ulysses_sequence_parallel_size > 1:
-            from verl.models.transformers.monkey_patch import apply_monkey_patch
-            apply_monkey_patch(config, verbose=True)
-
-        # This may be very large
-        init_context = get_init_weight_context_manager(use_meta_tensor=not config.tie_word_embeddings)
-
-        with init_context():
-            if self.config.model.from_config:
-                self.model: PreTrainedModel = AutoModelForCausalLM.from_config(config, 
-                                                                               torch_dtype=torch.float32,
-                                                                               attn_implementation='flash_attention_2',
-                                                                               trust_remote_code=trust_remote_code)
-            else:
-                self.model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(local_model_path,
-                                                                               config=config,
-                                                                               torch_dtype=torch.float32,
-                                                                               attn_implementation='flash_attention_2',
-                                                                               trust_remote_code=trust_remote_code)
-                
-            print("MODEL TOTAL PARAMS:", sum(p.numel() for p in self.model.parameters()))
-
-            # Apply Liger kernel if use_liger is enabled
-            if self.config.model.get('use_liger', False):
-                from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
-                _apply_liger_kernel_to_instance(model=self.model)
-
-            if self.config.model.get('lora_rank', 0) > 0:
-                self.model.enable_input_require_grads()
-                # Convert config to regular Python types before creating PEFT model
-                lora_config = {
-                    'task_type': TaskType.CAUSAL_LM,
-                    'r': self.config.model.lora_rank,
-                    'lora_alpha': self.config.model.lora_alpha,
-                    'target_modules': convert_to_regular_types(self.config.model.target_modules),
-                    'bias': "none"
-                }
-                self.model = get_peft_model(self.model, LoraConfig(**lora_config))
-
-        if self.config.model.enable_gradient_checkpointing:
-            self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant': False})
-
-        log_gpu_memory_usage('After model allocation', logger=logger)
-
-        mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, # simple
-                                         reduce_dtype=torch.float32,
-                                         buffer_dtype=torch.float32)
-
-        auto_wrap_policy = get_fsdp_wrap_policy(self.model,
-                                                config=self.config.model.fsdp_config.wrap_policy,
-                                                is_lora=self.config.model.get('lora_rank', 0) > 0)
-        if self.device_mesh.get_rank() == 0:
-            print(auto_wrap_policy)
-
-        if not self.config.model.fsdp_config.cpu_offload:
-            cpu_offload = None
+        if self.config.model.from_config:
+            model: PreTrainedModel = AutoModelForCausalLM.from_config(config, 
+                                                                            torch_dtype=torch.float32,
+                                                                            attn_implementation='flash_attention_2',
+                                                                            trust_remote_code=trust_remote_code)
         else:
-            cpu_offload = CPUOffload(offload_params=self.config.model.fsdp_config.offload_params)
-
-        self.fsdp_model = FSDP(module=self.model,
-                               auto_wrap_policy=auto_wrap_policy,
-                               param_init_fn=init_fn,
-                               sharding_strategy=ShardingStrategy.FULL_SHARD,
-                               mixed_precision=mixed_precision,
-                               device_mesh=self.device_mesh,
-                               sync_module_states=True,
-                               device_id=torch.cuda.current_device(),
-                               cpu_offload=cpu_offload,
-                               use_orig_params=False)
-
-        log_gpu_memory_usage('After FSDP wrapping', logger=logger)
-
-        self.optimizer = optim.AdamW(self.fsdp_model.parameters(),
-                                     lr=self.config.optim.lr,
-                                     betas=self.config.optim.betas,
-                                     weight_decay=self.config.optim.weight_decay)
-
-        log_gpu_memory_usage('After initialize optimizer', logger=logger)
-
-        self.steps_per_epoch = len(self.train_dataloader)
-        self.total_steps = self.steps_per_epoch * self.config.trainer.total_epochs
-
-        if self.device_mesh.get_rank() == 0:
-            print(
-                f'Number of steps/epoch {self.steps_per_epoch}, number of epochs {self.config.trainer.total_epochs}, total number of steps {self.total_steps}'
-            )
-
-        num_warmup_steps = int(self.total_steps * self.config.optim.warmup_steps_ratio)
-
-        self.lr_scheduler = get_cosine_schedule_with_warmup(optimizer=self.optimizer,
-                                                            num_warmup_steps=num_warmup_steps,
-                                                            num_training_steps=self.total_steps)
+            model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(local_model_path, 
+                                                                            torch_dtype=torch.float32,
+                                                                            attn_implementation='flash_attention_2',
+                                                                            trust_remote_code=trust_remote_code)
+            
+        print("MODEL TOTAL PARAMS:", sum(p.numel() for p in model.parameters()))
+        return model
