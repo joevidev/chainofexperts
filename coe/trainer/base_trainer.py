@@ -31,6 +31,8 @@ logger.setLevel(os.getenv('VERL_SFT_LOGGING_LEVEL', 'WARN'))
 from coe.utils.dataset.base_dataset import BaseDataset
 from coe.trainer.fsdp_sft_trainer import FSDPSFTTrainer
 from coe.utils.debug.performance import get_gpu_memory_usage
+import wandb
+import time
 
 # temporary for debugging
 from typing import List, Union
@@ -165,7 +167,7 @@ class BaseTrainer(FSDPSFTTrainer):
             if rank == 0:
                 tracking.log(data=metric, step=global_step)
                 wandb.log(get_gpu_memory_usage(rank=0), step=global_step) # only log rank 0, assume all ranks have the same memory usage
-            
+                wandb.log({"System-core/time": time.time()}, step=global_step)
             global_step += 1
             
             # Run validation if needed

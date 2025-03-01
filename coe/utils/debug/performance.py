@@ -24,6 +24,6 @@ def get_gpu_memory_usage(rank: int = 0):
         memory_reserved = torch.cuda.memory_reserved() / 1024**3
 
         return {
-                "gpu/memory_allocated_gb": memory_allocated,
-                "gpu/memory_reserved_gb": memory_reserved,  # This tracks reserved memory
+                "System-core/memory_allocated_gb": memory_allocated,
+                "System-core/memory_reserved_gb": memory_reserved,  # This tracks reserved memory
             }

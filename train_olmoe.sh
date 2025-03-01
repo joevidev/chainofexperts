@@ -9,12 +9,14 @@ configs=(
     # "64epts-8topk-1iter-16lyr:64:8:1:16"
     # Memory-matched experiments (64 experts → 8 selected)
     "64epts-8topk-1iter-1lyr:64:8:1:1"
+    "8epts-8topk-1iter-1lyr:8:8:1:1"
+
     # "64epts-8topk-1iter-2lyr:64:8:1:2"
+    # "64epts-8topk-1iter-4lyr:64:8:1:4"
     # "64epts-8topk-1iter-6lyr:64:8:1:6"
     # "64epts-8topk-1iter-8lyr:64:8:1:8"
     
-    # # Memory-matched experiments (8 experts → 8 selected, dense)
-    # "8epts-8topk-1iter-1lyr:8:8:1:1"
+    # # # Memory-matched experiments (8 experts → 8 selected, dense)
     # "8epts-8topk-1iter-2lyr:8:8:1:2"
     # "8epts-8topk-1iter-4lyr:8:8:1:4" 
     # "8epts-8topk-1iter-6lyr:8:8:1:6" 
