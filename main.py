@@ -24,6 +24,13 @@ from verl.utils.distributed import initialize_global_process_group
 
 from coe.trainer.base_trainer import BaseTrainer
 
+# set up all random seeds to be 42
+import numpy
+numpy.random.seed(42)
+torch.manual_seed(42)
+torch.cuda.manual_seed(42)
+torch.cuda.manual_seed_all(42)
+
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv('VERL_SFT_LOGGING_LEVEL', 'WARN'))
 
