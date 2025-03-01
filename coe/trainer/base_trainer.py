@@ -17,6 +17,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
 from torch.utils.data import DataLoader, DistributedSampler
 from torch import nn, optim
+from tensordict import TensorDict
 from verl.utils.dataset import SFTDataset
 from torch.distributed.device_mesh import DeviceMesh
 from verl.utils.debug import log_gpu_memory_usage
@@ -38,7 +39,7 @@ from transformers import PreTrainedTokenizer
 from verl.utils.fs import copy_to_local
 from verl.utils.model import compute_position_id_with_mask
 from verl.utils import hf_tokenizer
-
+from verl.utils.tracking import Tracking
 
 
 
@@ -120,3 +121,82 @@ class BaseTrainer(FSDPSFTTrainer):
             
         print("MODEL TOTAL PARAMS:", sum(p.numel() for p in model.parameters()))
         return model
+    
+    def fit(self):
+        rank = self.device_mesh.get_rank()
+
+        # TODO: add a unified tracking
+        if rank == 0:
+            tracking = Tracking(project_name=self.config.trainer.project_name,
+                                experiment_name=self.config.trainer.experiment_name,
+                                default_backend=self.config.trainer.logger)
+
+        global_step = 0
+        # compute the total training steps.
+        # the total training steps in SFT is mainly for early exit
+        # assert only 1 is valid
+        
+        # TODO (zhangchi.usc1992) add back checkpoint manager. Currently, it blocks when uploading to hdfs. So very slow.
+        # Configure validation interval
+        validation_interval = self.config.trainer.validation_interval_steps if hasattr(self.config.trainer, 'validation_interval_steps') else None
+        # Configure checkpoint saving interval
+        save_interval = self.config.trainer.save_interval_steps if hasattr(self.config.trainer, 'save_interval_steps') else None
+
+        # Get data iterator so we can manually control iterations
+        train_iterator = iter(self.train_dataloader)
+    
+        epoch = 0
+        while global_step < self.total_steps:
+            try:
+                data = next(train_iterator)
+            except StopIteration:
+                # Reset iterator for next epoch
+                epoch += 1
+                self.train_sampler.set_epoch(epoch=epoch)
+                train_iterator = iter(self.train_dataloader)
+                data = next(train_iterator)
+                
+            # Process batch    
+            data = TensorDict(data, batch_size=self.config.data.train_batch_size).cuda()
+            metric = self.training_step(data)
+            
+            if rank == 0:
+                tracking.log(data=metric, step=global_step)
+            
+            global_step += 1
+            
+            # Run validation if needed
+            if validation_interval and global_step % validation_interval == 0:
+                self._run_validation(global_step, rank, tracking)
+                torch.distributed.barrier()
+            
+            # Save checkpoint if needed
+            if save_interval and global_step % save_interval == 0:
+                self.save_checkpoint(step=global_step)
+            
+        self._run_validation(global_step, rank, tracking)
+        torch.distributed.barrier()
+        
+        # Final checkpoint
+        self.save_checkpoint(step=global_step)
+
+    def _run_validation(self, global_step, rank, tracking):
+        """Helper method to run validation"""
+        val_losses = []
+        total_validation_count = self.config.trainer.total_validation_count
+        val_count = 0
+        for data in self.val_dataloader:
+            data = TensorDict(data, batch_size=self.config.data.micro_batch_size_per_gpu).cuda()
+            val_loss = self.validation_step(data)
+            val_losses.append(val_loss)
+            val_count += data['input_ids'].size(0)
+            if val_count >= total_validation_count:
+                break
+            
+        if val_count < total_validation_count:
+            logger.warn(f"Validation count {val_count} is less than total_validation_count {total_validation_count}")
+        
+        if rank == 0:
+            avg_val_loss = torch.mean(torch.stack(val_losses))
+            metric = {'val/loss': avg_val_loss.detach().item()}
+            tracking.log(data=metric, step=global_step)

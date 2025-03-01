@@ -38,8 +38,10 @@ trainer:
   resume_path: null
   project_name: gsm8k-sft
   experiment_name: test
-  total_epochs: 4
-  total_training_steps: null
+  total_epochs: null
+  total_training_steps: 2000
+  validation_interval_steps: 100
+  total_validation_count: 100
   logger: ['console']
   seed: 1
 

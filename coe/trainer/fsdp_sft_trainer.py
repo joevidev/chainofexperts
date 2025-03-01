@@ -138,6 +138,17 @@ class FSDPSFTTrainer(object):
                                       max_length=config.data.max_length,
                                       truncation=config.data.truncation)
         
+    def _set_total_steps(self):
+        assert (self.config.trainer.total_epochs is not None) ^ (self.config.trainer.total_training_steps is not None), "Only one of total_epochs and total_training_steps should be set"
+        if self.config.trainer.total_epochs is not None:
+            total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
+
+        if self.config.trainer.total_training_steps is not None:
+            total_training_steps = self.config.trainer.total_training_steps
+
+        self.total_steps = total_training_steps
+        print(f'Total training steps: {self.total_steps}')
+        
     def _normalize_config_bsz(self):
         dp_size = self.device_mesh.size(0) if not self.ulysses_device_mesh else self.ulysses_device_mesh.size(0)
         if self.device_mesh.get_rank() == 0:
@@ -283,7 +294,8 @@ class FSDPSFTTrainer(object):
         log_gpu_memory_usage('After initialize optimizer', logger=logger)
 
         self.steps_per_epoch = len(self.train_dataloader)
-        self.total_steps = self.steps_per_epoch * self.config.trainer.total_epochs
+    
+        self._set_total_steps()
 
         if self.device_mesh.get_rank() == 0:
             print(
@@ -386,7 +398,6 @@ class FSDPSFTTrainer(object):
                     dp_size = self.ulysses_device_mesh.size('dp') if use_sp else torch.distributed.get_world_size()
                 else:
                     dp_size = 1
-
                 loss = torch.sum(loss) / valid_token_this_rank * dp_size
 
                 if do_backward:

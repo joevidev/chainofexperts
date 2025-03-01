@@ -167,3 +167,15 @@ class BaseDataset(Dataset):
             'position_ids': position_ids,
             'loss_mask': loss_mask
         }
+
+# unittest
+if __name__ == '__main__':
+    dataset = BaseDataset(
+        parquet_files='data/metamathqa/train.parquet',
+        tokenizer='gpt2',
+        text_keys=[['query','response']],
+        max_length=1024,
+        truncation='right',
+    )
+    dataset[0]
+        

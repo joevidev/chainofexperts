@@ -6,7 +6,7 @@ export PYTHONPATH=/home/zihan/CoE:$PYTHONPATH
 # Define configuration combinations
 # Format: experiment_suffix:sparsity:granularity:topk
 configs=(
-    "sparse2:2:1:1"    # 2 experts, granularity 1, topk 1
+    # "sparse2:2:1:1"    # 2 experts, granularity 1, topk 1
     # "sparse4:4:1:1"    # 4 experts, granularity 1, topk 1
     # "sparse1:1:1:1"    # Original pythia-160m (no MoE)
     # "sparse4gra2:4:2:1"  # 4 experts, granularity 2, topk 1
@@ -18,14 +18,17 @@ base_args=(
     "trainer.project_name=metamathqa-sft"
     "data.train_files=data/metamathqa/train.parquet"
     "data.val_files=data/metamathqa/test.parquet"
-    "data.truncation=left"
+    "data.truncation=right"
     "+data.text_keys=['query','response']"
     "data.micro_batch_size_per_gpu=8"
     "data.train_batch_size=32"
     "model.partial_pretrain=config/models/pythia-dsmoe-160m"
     "+model.from_config=true"
     "trainer.default_local_dir=output"
-    "trainer.total_epochs=1"
+    "trainer.total_epochs=null"
+    "trainer.total_training_steps=1000"
+    "trainer.validation_interval_steps=10"
+    "trainer.total_validation_count=100"
     "trainer.logger=['console','wandb']"
     "trainer.default_hdfs_dir=null"
 )

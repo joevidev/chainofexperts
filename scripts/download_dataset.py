@@ -2,8 +2,13 @@ import pandas as pd
 import datasets
 from datasets import load_dataset
 import os
+import numpy as np
+import requests
+import json
 
-# 加载GSM8K数据集
+
+np.random.seed(42)
+
 gsm8k = load_dataset("gsm8k", "main")
 
 train_data = []
@@ -20,20 +25,13 @@ for item in gsm8k["test"]:
         "answer": item["answer"]
     })
 
-# 转换为pandas DataFrame
 train_df = pd.DataFrame(train_data)
 test_df = pd.DataFrame(test_data)
 
-# 保存为parquet文件
 os.makedirs("data/gsm8k", exist_ok=True)
 train_df.to_parquet("data/gsm8k/train.parquet")
 test_df.to_parquet("data/gsm8k/test.parquet")
 
-import requests
-import os
-import json
-import pandas as pd
-import numpy as np
 
 # URL of the dataset
 url = "https://huggingface.co/datasets/meta-math/MetaMathQA/resolve/main/MetaMathQA-395K.json"
