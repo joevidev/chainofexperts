@@ -172,6 +172,7 @@ for config in "${configs[@]}"; do
 
     # calculate batch size per gpu. for 16 layers, this is 32. Should be smaller than training batch size.
     # batch_size_per_gpu=$((16 * 4 / $num_hidden_layers))
+    batch_size_per_gpu=32
     cmd+=" data.micro_batch_size_per_gpu=$batch_size_per_gpu"
     echo "Batch size per GPU: $batch_size_per_gpu"
 
