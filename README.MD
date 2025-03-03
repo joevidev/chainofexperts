@@ -127,29 +127,13 @@ To run this experiment, please uncomment the following lines in `runs/run.sh`:
 
 Independent gating mechanisms can enhance model performance and to some extent explain expert specialization, indicating that the same expert processes different types of information at different iteration stages.
 
-We implemented a CoE variant with shared gating, using shared $g_i$ instead of $g_{t,i}$, specifically:
-
-$x^{(0)} = x$
-
-$x^{(t)} = \sum_{i=1}^{K/C} g_i \cdot \text{FFN}_i(x^{(t-1)}) + I_r \cdot x^{(t-1)}, \quad t = 1, 2, ..., C$
-
-$y = x^{(C)}$
-
-We found performance worse than CoE and even worse than non-scaled MoE, as shown in the figure, demonstrating the effectiveness of the independent gating mechanism.
+We implemented a CoE variant with shared gating. We found performance worse than CoE and even worse than non-scaled MoE, as shown in the figure, demonstrating the effectiveness of the independent gating mechanism.
 
 **b. Residual connections**
 
 Inner residual connections are more effective than outer residual connections, indicating that sequential processing of tokens by each group of experts is actually increasing the model's effective depth, with each expert better learning residuals.
 
-We implemented a variant with outer residual connections, setting $\mathbb{I}_r$ to 0 and connecting the residual after the intra-layer iterative processing ends, specifically:
-
-$x^{(0)} = x$
-
-$x^{(t)} = \sum_{i=1}^{K/C} g_{t,i} \cdot \text{FFN}_i(x^{(t-1)}), \quad t = 1, 2, ..., C$
-
-$y = x^{(C)} + x$
-
-We found performance worse than CoE and comparable to MoE, as shown in the figure, demonstrating the effectiveness of inner residual.
+We implemented a variant with outer residual connections, setting $\mathbb{I}_r$ to 0 and connecting the residual after the intra-layer iterative processing ends. We found performance worse than CoE and comparable to MoE, as shown in the figure, demonstrating the effectiveness of inner residual.
 
 ![image.png](scripts/plot/plot_abl.png)
 
