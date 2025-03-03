@@ -6,9 +6,9 @@
   "attention_bias": false,
   "attention_dropout": 0.0,
   "auto_map": {
-    "AutoConfig": "deepseek-ai/DeepSeek-V2-Lite--configuration_deepseek.DeepseekV2Config",
-    "AutoModel": "deepseek-ai/DeepSeek-V2-Lite--modeling_deepseek.DeepseekV2Model",
-    "AutoModelForCausalLM": "deepseek-ai/DeepSeek-V2-Lite--modeling_deepseek.DeepseekV2ForCausalLM"
+    "AutoConfig": "configuration_deepseek.DeepseekV2Config",
+    "AutoModel": "modeling_deepseek.DeepseekV2Model",
+    "AutoModelForCausalLM": "modeling_deepseek.DeepseekV2ForCausalLM"
   },
   "aux_loss_alpha": 0.001,
   "bos_token_id": 100000,
@@ -21,7 +21,7 @@
   "intermediate_size": 5472,
   "kv_lora_rank": 512,
   "max_position_embeddings": 163840,
-  "model_type": "deepseek_v2",
+  "model_type": "deepseek_v2_coe",
   "moe_intermediate_size": 704,
   "moe_layer_freq": 1,
   "n_group": 1,
@@ -57,5 +57,9 @@
   "transformers_version": "4.49.0",
   "use_cache": true,
   "v_head_dim": 128,
-  "vocab_size": 102400
+  "vocab_size": 102400,
+  "inner_iter": 1,
+  "outer_residual": false,
+  "inner_residual": true,
+  "use_igate": true
 }

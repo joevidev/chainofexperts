@@ -32,7 +32,7 @@ from torch import nn, optim
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy, CPUOffload
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, AutoConfig
-from verl.utils.torch_functional import get_cosine_schedule_with_warmup
+from verl.utils.torch_functional import get_cosine_schedule_with_warmup, get_constant_schedule_with_warmup
 from tensordict import TensorDict
 from torch.utils.data import DataLoader, DistributedSampler
 from flash_attn.bert_padding import pad_input, unpad_input, rearrange, index_first_axis
@@ -304,9 +304,19 @@ class FSDPSFTTrainer(object):
 
         num_warmup_steps = int(self.total_steps * self.config.optim.warmup_steps_ratio)
 
-        self.lr_scheduler = get_cosine_schedule_with_warmup(optimizer=self.optimizer,
-                                                            num_warmup_steps=num_warmup_steps,
-                                                            num_training_steps=self.total_steps)
+        self._build_lr_scheduler(num_warmup_steps)
+
+
+    def _build_lr_scheduler(self, num_warmup_steps):
+        if self.config.optim.lr_scheduler == 'constant':
+            self.lr_scheduler = get_constant_schedule_with_warmup(optimizer=self.optimizer,
+                                                                  num_warmup_steps=num_warmup_steps)
+        elif self.config.optim.lr_scheduler == 'cosine':
+            self.lr_scheduler = get_cosine_schedule_with_warmup(optimizer=self.optimizer,
+                                                                num_warmup_steps=num_warmup_steps,
+                                                                num_training_steps=self.total_steps)
+        else:
+            raise ValueError(f'Unknown lr scheduler: {self.config.optim.lr_scheduler}')
 
     def _compute_loss_and_backward(self, batch, do_backward=True):
         """Compute loss with optional sequence parallelism and remove padding features"""

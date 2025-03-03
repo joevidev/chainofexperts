@@ -526,6 +526,7 @@ class DeepseekV2MoE(nn.Module):
         super().__init__()
         self.config = config
         self.num_experts_per_tok = config.num_experts_per_tok
+        self.inner_iter = config.inner_iter
 
         if hasattr(config, "ep_size") and config.ep_size > 1:
             assert config.ep_size == dist.get_world_size()
@@ -557,17 +558,25 @@ class DeepseekV2MoE(nn.Module):
                     for i in range(config.n_routed_experts)
                 ]
             )
-        self.gate = MoEGate(config)
+        self.use_igate = config.use_igate
+        if self.use_igate:
+            self.gate = nn.ModuleList([MoEGate(config) for _ in range(self.inner_iter)])
+        else:
+            self.gate = MoEGate(config)
+
         if config.n_shared_experts is not None:
             intermediate_size = config.moe_intermediate_size * config.n_shared_experts
             self.shared_experts = DeepseekV2MLP(
                 config=config, intermediate_size=intermediate_size
             )
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states, _iter: int):
         identity = hidden_states
         orig_shape = hidden_states.shape
-        topk_idx, topk_weight, aux_loss = self.gate(hidden_states)
+        if self.use_igate:
+            topk_idx, topk_weight, aux_loss = self.gate[_iter](hidden_states)
+        else:
+            topk_idx, topk_weight, aux_loss = self.gate(hidden_states)    
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         flat_topk_idx = topk_idx.view(-1)
         if self.training:
@@ -1218,6 +1227,10 @@ class DeepseekV2DecoderLayer(nn.Module):
         self.post_attention_layernorm = DeepseekV2RMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
         )
+        self.inner_iter = config.inner_iter
+        self.outer_residual = config.outer_residual
+        self.inner_residual = config.inner_residual
+
 
     def forward(
         self,
@@ -1265,11 +1278,21 @@ class DeepseekV2DecoderLayer(nn.Module):
         )
         hidden_states = residual + hidden_states
 
+        def custom_forward(hidden_states, _iter):
+            if self.inner_residual:
+                inner_residual = hidden_states
+            hidden_states = self.mlp(hidden_states, _iter)
+            if self.inner_residual:
+                hidden_states = inner_residual + hidden_states
+            return hidden_states
+
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
+        for _iter in range(self.inner_iter):
+            hidden_states = custom_forward(hidden_states, _iter)
+        if self.outer_residual:
+            hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
 
