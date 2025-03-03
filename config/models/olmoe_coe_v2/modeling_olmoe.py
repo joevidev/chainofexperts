@@ -617,7 +617,36 @@ class OlmoeSparseMoeBlock(nn.Module):
             self.gate = nn.Linear(config.hidden_size, self.num_experts, bias=False)
         self.experts = nn.ModuleList([OlmoeMLP(config) for _ in range(self.num_experts)])
 
+
     def forward(self, hidden_states: torch.Tensor, _iter: int) -> torch.Tensor:
+        batch_size, sequence_length, hidden_dim = hidden_states.shape
+        hidden_states = hidden_states.view(-1, hidden_dim)
+        # router_logits: (batch * sequence_length, n_experts)
+        if self.use_igate:
+            router_logits = self.gate[_iter](hidden_states)
+        else:
+            router_logits = self.gate(hidden_states)
+        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+        routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+        if self.norm_topk_prob:
+            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        # we cast back to the input dtype
+        routing_weights = routing_weights.to(hidden_states.dtype)
+
+        flat_topk_idx = selected_experts.view(-1)
+        hidden_states = hidden_states.repeat_interleave(
+            self.top_k, dim=0
+        )
+        y = torch.empty_like(hidden_states)
+        for i, expert in enumerate(self.experts):
+            y[flat_topk_idx == i] = expert(hidden_states[flat_topk_idx == i])
+        y = (y.view(*routing_weights.shape, -1) * routing_weights.unsqueeze(-1)).sum(dim=1)
+        y = y.to(hidden_states.dtype).view(batch_size, sequence_length, hidden_dim)
+
+        return y, router_logits
+
+
+    def forward_old(self, hidden_states: torch.Tensor, _iter: int) -> torch.Tensor:
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
         # router_logits: (batch * sequence_length, n_experts)
