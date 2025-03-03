@@ -2,7 +2,6 @@ transformers
 flash-attn
 datasets
 accelerate
-torch
 numpy
 wandb
 hydra-core
