@@ -7,9 +7,11 @@ export GENERAL_NAME="dsv2_coe"
 export CONFIGS=(
     "64ept-8tpk-1itr:64:8:1"
 )
-export TRAIN_FILES="data/metamathqa/test.parquet" # debug
+export TRAIN_FILES="data/metamathqa/train.parquet"
 export VAL_FILES="data/metamathqa/test.parquet"
-export TRAIN_BATCH_SIZE=8
+export TRAIN_BATCH_SIZE=256
+export MICRO_BATCH_SIZE_PER_GPU=32
+
 
 # Add any extra configurations or overrides
 
