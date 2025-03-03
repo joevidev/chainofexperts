@@ -3,18 +3,18 @@ from transformers.utils import logging
 
 logger = logging.get_logger(__name__)
 
-DEEPSEEK_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
-class DeepseekV2Config(PretrainedConfig):
+COE_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
+class CoeConfig(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`DeepseekV2Model`]. It is used to instantiate an DeepSeek
+    This is the configuration class to store the configuration of a [`CoeModel`]. It is used to instantiate an Chain-of-Experts
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
-    defaults will yield a similar configuration to that of the DeepSeek-V2.
+    defaults will yield a similar configuration to that of the CoE Model.
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
     Args:
         vocab_size (`int`, *optional*, defaults to 102400):
             Vocabulary size of the Deep model. Defines the number of different tokens that can be represented by the
-            `inputs_ids` passed when calling [`DeepseekV2Model`]
+            `inputs_ids` passed when calling [`CoeModel`]
         hidden_size (`int`, *optional*, defaults to 4096):
             Dimension of the hidden representations.
         intermediate_size (`int`, *optional*, defaults to 11008):
@@ -96,14 +96,14 @@ class DeepseekV2Config(PretrainedConfig):
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
     ```python
-    >>> from transformers import DeepseekV2Model, DeepseekV2Config
-    >>> # Initializing a Deepseek-V2 style configuration
-    >>> configuration = DeepseekV2Config()
+    >>> from transformers import CoeModel, CoeConfig
+    >>> # Initializing a CoE style configuration
+    >>> configuration = CoeConfig()
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
 
-    model_type = "deepseek_v2"
+    model_type = "coe_deepseekv2"
     keys_to_ignore_at_inference = ["past_key_values"]
 
     def __init__(

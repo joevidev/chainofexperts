@@ -17,17 +17,19 @@ TOTAL_VALIDATION_COUNT=${TOTAL_VALIDATION_COUNT:-100}
 MAX_LENGTH=${MAX_LENGTH:-512}
 TEXT_KEYS=${TEXT_KEYS:-"['query','response']"}
 LOGGER=${LOGGER:-"['console','wandb']"}
-MODEL_PATH=${MODEL_PATH:-"config/models/dsv2_coe"}
-OUTER_RESIDUAL=${OUTER_RESIDUAL:-false}
-INNER_RESIDUAL=${INNER_RESIDUAL:-true}
+MODEL_PATH=${MODEL_PATH:-"config/models/coe_deepseekv2"}
 ATTN_IMPL=${ATTN_IMPL:-"flash_attention_2"}
 DEFAULT_LOCAL_DIR=${DEFAULT_LOCAL_DIR:-"output"}
 DEFAULT_HDFS_DIR=${DEFAULT_HDFS_DIR:-"null"}
 TRUNCATION=${TRUNCATION:-"right"}
-NUM_HIDDEN_LAYERS=${NUM_HIDDEN_LAYERS:-4}
-USE_IGATE=${USE_IGATE:-true}
 N_SHARED_EXPERTS=${N_SHARED_EXPERTS:-1}
 LR_SCHEDULER=${LR_SCHEDULER:-"constant"}
+
+# arguments that may be overridden by the calling script
+OUTER_RESIDUAL=${OUTER_RESIDUAL:-false}
+INNER_RESIDUAL=${INNER_RESIDUAL:-true}
+USE_IGATE=${USE_IGATE:-true}
+
 # Set environment variables
 export PYTHONPATH=/home/zihan/CoE:$PYTHONPATH
 export CUDA_VISIBLE_DEVICES=$CUDA_DEVICE
@@ -48,7 +50,6 @@ base_args=(
     "+model.override_config._attn_implementation=$ATTN_IMPL"
     "+model.override_config.outer_residual=$OUTER_RESIDUAL"
     "+model.override_config.inner_residual=$INNER_RESIDUAL"
-    "+model.override_config.num_hidden_layers=$NUM_HIDDEN_LAYERS"
     "+model.override_config.use_igate=$USE_IGATE"
     "+model.override_config.n_shared_experts=$N_SHARED_EXPERTS"
     "trainer.default_local_dir=$DEFAULT_LOCAL_DIR"
@@ -106,7 +107,12 @@ for config in "${CONFIGS[@]}"; do
             fi
             
             # Add to command
-            cmd+=" +model.override_config.$key=$value"
+            # if key is in above, use ++, otherwise use +
+            if [[ "$key" == "outer_residual" || "$key" == "inner_residual" || "$key" == "use_igate" ]]; then
+                cmd+=" ++model.override_config.$key=$value"
+            else
+                cmd+=" +model.override_config.$key=$value"
+            fi
         done
     fi
     

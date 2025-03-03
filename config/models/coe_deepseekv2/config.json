@@ -1,14 +1,14 @@
 {
-  "_name_or_path": "deepseek-ai/DeepSeek-V2-Lite",
+  "_name_or_path": "ZihanWang314/CoE-DeepSeek-V2-Tiny",
   "architectures": [
-    "DeepseekV2ForCausalLM"
+    "CoeForCausalLM"
   ],
   "attention_bias": false,
   "attention_dropout": 0.0,
   "auto_map": {
-    "AutoConfig": "configuration_deepseek.DeepseekV2Config",
-    "AutoModel": "modeling_deepseek.DeepseekV2Model",
-    "AutoModelForCausalLM": "modeling_deepseek.DeepseekV2ForCausalLM"
+    "AutoConfig": "configuration_coe.CoeConfig",
+    "AutoModel": "modeling_coe.CoeModel",
+    "AutoModelForCausalLM": "modeling_coe.CoeForCausalLM"
   },
   "aux_loss_alpha": 0.001,
   "bos_token_id": 100000,
@@ -21,7 +21,7 @@
   "intermediate_size": 5472,
   "kv_lora_rank": 512,
   "max_position_embeddings": 163840,
-  "model_type": "deepseek_v2_coe",
+  "model_type": "coe_deepseekv2",
   "moe_intermediate_size": 704,
   "moe_layer_freq": 1,
   "n_group": 1,

@@ -1,10 +1,11 @@
 # coding=utf-8
-# Copyright 2023 DeepSeek-AI and The HuggingFace Inc. team. All rights reserved.
+# Copyright 2025 The HuggingFace Inc. team. All rights reserved.
 #
-# This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
-# and OPT implementations in this library. It has been modified from its
-# original forms to accommodate minor architectural differences compared
-# to GPT-NeoX and OPT used by the Meta AI team that trained the model.
+# This code is based on EleutherAI's GPT-NeoX library, DeepSeek AI's 
+# DeepSeek-V2 and the GPT-NeoX and OPT implementations in this library. 
+# It has been modified from its original forms to accommodate minor 
+# architectural differences compared to GPT-NeoX and OPT used by the
+# Meta AI team that trained the model.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,7 +18,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch DeepSeek model."""
+""" PyTorch CoE model."""
 import math
 import warnings
 from typing import List, Optional, Tuple, Union
@@ -54,7 +55,7 @@ from transformers.utils import (
     replace_return_docstrings,
 )
 from transformers.utils.import_utils import is_torch_fx_available
-from .configuration_deepseek import DeepseekV2Config
+from .configuration_coe import CoeConfig
 import torch.distributed as dist
 import numpy as np
 
@@ -74,7 +75,7 @@ if is_torch_fx_available():
 
 logger = logging.get_logger(__name__)
 
-_CONFIG_FOR_DOC = "DeepseekV2Config"
+_CONFIG_FOR_DOC = "CoeConfig"
 
 
 def _get_unpad_data(attention_mask):
@@ -91,10 +92,10 @@ def _get_unpad_data(attention_mask):
     )
 
 
-class DeepseekV2RMSNorm(nn.Module):
+class CoeRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
-        DeepseekV2RMSNorm is equivalent to T5LayerNorm
+        CoeRMSNorm is equivalent to T5LayerNorm
         """
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
@@ -108,10 +109,10 @@ class DeepseekV2RMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
-ALL_LAYERNORM_LAYERS.append(DeepseekV2RMSNorm)
+ALL_LAYERNORM_LAYERS.append(CoeRMSNorm)
 
 
-class DeepseekV2RotaryEmbedding(nn.Module):
+class CoeRotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
         super().__init__()
         self.dim = dim
@@ -153,9 +154,9 @@ class DeepseekV2RotaryEmbedding(nn.Module):
         )
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaLinearScalingRotaryEmbedding with Llama->DeepseekV2
-class DeepseekV2LinearScalingRotaryEmbedding(DeepseekV2RotaryEmbedding):
-    """DeepseekV2RotaryEmbedding extended with linear scaling. Credits to the Reddit user /u/kaiokendev"""
+# Copied from transformers.models.llama.modeling_llama.LlamaLinearScalingRotaryEmbedding with Llama->Coe
+class CoeLinearScalingRotaryEmbedding(CoeRotaryEmbedding):
+    """CoeRotaryEmbedding extended with linear scaling. Credits to the Reddit user /u/kaiokendev"""
 
     def __init__(
         self,
@@ -182,9 +183,9 @@ class DeepseekV2LinearScalingRotaryEmbedding(DeepseekV2RotaryEmbedding):
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaDynamicNTKScalingRotaryEmbedding with Llama->DeepseekV2
-class DeepseekV2DynamicNTKScalingRotaryEmbedding(DeepseekV2RotaryEmbedding):
-    """DeepseekV2RotaryEmbedding extended with Dynamic NTK scaling. Credits to the Reddit users /u/bloc97 and /u/emozilla"""
+# Copied from transformers.models.llama.modeling_llama.LlamaDynamicNTKScalingRotaryEmbedding with Llama->Coe
+class CoeDynamicNTKScalingRotaryEmbedding(CoeRotaryEmbedding):
+    """CoeRotaryEmbedding extended with Dynamic NTK scaling. Credits to the Reddit users /u/bloc97 and /u/emozilla"""
 
     def __init__(
         self,
@@ -258,7 +259,7 @@ def yarn_linear_ramp_mask(min, max, dim):
     return ramp_func
 
 
-class DeepseekV2YarnRotaryEmbedding(DeepseekV2RotaryEmbedding):
+class CoeYarnRotaryEmbedding(CoeRotaryEmbedding):
 
     def __init__(
         self,
@@ -370,7 +371,7 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
     return q_embed, k_embed
 
 
-class DeepseekV2MLP(nn.Module):
+class CoeMLP(nn.Module):
     def __init__(self, config, hidden_size=None, intermediate_size=None):
         super().__init__()
         self.config = config
@@ -517,7 +518,7 @@ class AddAuxiliaryLoss(torch.autograd.Function):
         return grad_output, grad_loss
 
 
-class DeepseekV2MoE(nn.Module):
+class CoeMoE(nn.Module):
     """
     A mixed expert module containing shared experts.
     """
@@ -536,7 +537,7 @@ class DeepseekV2MoE(nn.Module):
             self.experts = nn.ModuleList(
                 [
                     (
-                        DeepseekV2MLP(
+                        CoeMLP(
                             config, intermediate_size=config.moe_intermediate_size
                         )
                         if i >= self.ep_rank * self.experts_per_rank
@@ -552,7 +553,7 @@ class DeepseekV2MoE(nn.Module):
             self.ep_rank = 0
             self.experts = nn.ModuleList(
                 [
-                    DeepseekV2MLP(
+                    CoeMLP(
                         config, intermediate_size=config.moe_intermediate_size
                     )
                     for i in range(config.n_routed_experts)
@@ -566,7 +567,7 @@ class DeepseekV2MoE(nn.Module):
 
         if config.n_shared_experts is not None:
             intermediate_size = config.moe_intermediate_size * config.n_shared_experts
-            self.shared_experts = DeepseekV2MLP(
+            self.shared_experts = CoeMLP(
                 config=config, intermediate_size=intermediate_size
             )
 
@@ -687,11 +688,11 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaAttention with Llama->DeepseekV2
-class DeepseekV2Attention(nn.Module):
+# Copied from transformers.models.llama.modeling_llama.LlamaAttention with Llama->Coe
+class CoeAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
-    def __init__(self, config: DeepseekV2Config, layer_idx: Optional[int] = None):
+    def __init__(self, config: CoeConfig, layer_idx: Optional[int] = None):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -725,7 +726,7 @@ class DeepseekV2Attention(nn.Module):
             self.q_a_proj = nn.Linear(
                 self.hidden_size, config.q_lora_rank, bias=config.attention_bias
             )
-            self.q_a_layernorm = DeepseekV2RMSNorm(config.q_lora_rank)
+            self.q_a_layernorm = CoeRMSNorm(config.q_lora_rank)
             self.q_b_proj = nn.Linear(
                 config.q_lora_rank, self.num_heads * self.q_head_dim, bias=False
             )
@@ -735,7 +736,7 @@ class DeepseekV2Attention(nn.Module):
             config.kv_lora_rank + config.qk_rope_head_dim,
             bias=config.attention_bias,
         )
-        self.kv_a_layernorm = DeepseekV2RMSNorm(config.kv_lora_rank)
+        self.kv_a_layernorm = CoeRMSNorm(config.kv_lora_rank)
         self.kv_b_proj = nn.Linear(
             config.kv_lora_rank,
             self.num_heads
@@ -760,7 +761,7 @@ class DeepseekV2Attention(nn.Module):
 
     def _init_rope(self):
         if self.config.rope_scaling is None:
-            self.rotary_emb = DeepseekV2RotaryEmbedding(
+            self.rotary_emb = CoeRotaryEmbedding(
                 self.qk_rope_head_dim,
                 max_position_embeddings=self.max_position_embeddings,
                 base=self.rope_theta,
@@ -769,14 +770,14 @@ class DeepseekV2Attention(nn.Module):
             scaling_type = self.config.rope_scaling["type"]
             scaling_factor = self.config.rope_scaling["factor"]
             if scaling_type == "linear":
-                self.rotary_emb = DeepseekV2LinearScalingRotaryEmbedding(
+                self.rotary_emb = CoeLinearScalingRotaryEmbedding(
                     self.qk_rope_head_dim,
                     max_position_embeddings=self.max_position_embeddings,
                     scaling_factor=scaling_factor,
                     base=self.rope_theta,
                 )
             elif scaling_type == "dynamic":
-                self.rotary_emb = DeepseekV2DynamicNTKScalingRotaryEmbedding(
+                self.rotary_emb = CoeDynamicNTKScalingRotaryEmbedding(
                     self.qk_rope_head_dim,
                     max_position_embeddings=self.max_position_embeddings,
                     scaling_factor=scaling_factor,
@@ -794,7 +795,7 @@ class DeepseekV2Attention(nn.Module):
                     ]
                     if key in self.config.rope_scaling
                 }
-                self.rotary_emb = DeepseekV2YarnRotaryEmbedding(
+                self.rotary_emb = CoeYarnRotaryEmbedding(
                     self.qk_rope_head_dim,
                     max_position_embeddings=self.max_position_embeddings,
                     scaling_factor=scaling_factor,
@@ -920,10 +921,10 @@ class DeepseekV2Attention(nn.Module):
         return attn_output, attn_weights, past_key_value
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaFlashAttention2 with Llama->DeepseekV2
-class DeepseekV2FlashAttention2(DeepseekV2Attention):
+# Copied from transformers.models.llama.modeling_llama.LlamaFlashAttention2 with Llama->Coe
+class CoeFlashAttention2(CoeAttention):
     """
-    DeepseekV2 flash attention module. This module inherits from `DeepseekV2Attention` as the weights of the module stays
+    Coe flash attention module. This module inherits from `CoeAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
     flash attention and deal with padding tokens in case the input contains any of them.
     """
@@ -946,7 +947,7 @@ class DeepseekV2FlashAttention2(DeepseekV2Attention):
         use_cache: bool = False,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        # DeepseekV2FlashAttention2 attention does not support output_attentions
+        # CoeFlashAttention2 attention does not support output_attentions
         if "padding_mask" in kwargs:
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use `attention_mask` instead.`"
@@ -1023,7 +1024,7 @@ class DeepseekV2FlashAttention2(DeepseekV2Attention):
         # therefore the input hidden states gets silently casted in float32. Hence, we need
         # cast them back in the correct dtype just to be sure everything works as expected.
         # This might slowdown training & inference so it is recommended to not cast the LayerNorms
-        # in fp32. (DeepseekV2RMSNorm handles it correctly)
+        # in fp32. (CoeRMSNorm handles it correctly)
 
         input_dtype = query_states.dtype
         if input_dtype == torch.float32:
@@ -1103,7 +1104,7 @@ class DeepseekV2FlashAttention2(DeepseekV2Attention):
         if not self._flash_attn_uses_top_left_mask:
             causal = self.is_causal
         else:
-            # TODO: Remove the `query_length != 1` check once Flash Attention for RoCm is bumped to 2.1. For details, please see the comment in DeepseekV2FlashAttention2 __init__.
+            # TODO: Remove the `query_length != 1` check once Flash Attention for RoCm is bumped to 2.1. For details, please see the comment in CoeFlashAttention2 __init__.
             causal = self.is_causal and query_length != 1
 
         # Contains at least one padding token in the sequence
@@ -1198,13 +1199,13 @@ class DeepseekV2FlashAttention2(DeepseekV2Attention):
 
 
 ATTENTION_CLASSES = {
-    "eager": DeepseekV2Attention,
-    "flash_attention_2": DeepseekV2FlashAttention2,
+    "eager": CoeAttention,
+    "flash_attention_2": CoeFlashAttention2,
 }
 
 
-class DeepseekV2DecoderLayer(nn.Module):
-    def __init__(self, config: DeepseekV2Config, layer_idx: int):
+class CoeDecoderLayer(nn.Module):
+    def __init__(self, config: CoeConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
 
@@ -1213,18 +1214,18 @@ class DeepseekV2DecoderLayer(nn.Module):
         )
 
         self.mlp = (
-            DeepseekV2MoE(config)
+            CoeMoE(config)
             if (
                 config.n_routed_experts is not None
                 and layer_idx >= config.first_k_dense_replace
                 and layer_idx % config.moe_layer_freq == 0
             )
-            else DeepseekV2MLP(config)
+            else CoeMLP(config)
         )
-        self.input_layernorm = DeepseekV2RMSNorm(
+        self.input_layernorm = CoeRMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
         )
-        self.post_attention_layernorm = DeepseekV2RMSNorm(
+        self.post_attention_layernorm = CoeRMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
         )
         self.inner_iter = config.inner_iter
@@ -1305,7 +1306,7 @@ class DeepseekV2DecoderLayer(nn.Module):
         return outputs
 
 
-DeepseekV2_START_DOCSTRING = r"""
+Coe_START_DOCSTRING = r"""
     This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.)
@@ -1315,7 +1316,7 @@ DeepseekV2_START_DOCSTRING = r"""
     and behavior.
 
     Parameters:
-        config ([`DeepseekV2Config`]):
+        config ([`CoeConfig`]):
             Model configuration class with all the parameters of the model. Initializing with a config file does not
             load the weights associated with the model, only the configuration. Check out the
             [`~PreTrainedModel.from_pretrained`] method to load the model weights.
@@ -1323,14 +1324,14 @@ DeepseekV2_START_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare DeepseekV2 Model outputting raw hidden-states without any specific head on top.",
-    DeepseekV2_START_DOCSTRING,
+    "The bare Coe Model outputting raw hidden-states without any specific head on top.",
+    Coe_START_DOCSTRING,
 )
-class DeepseekV2PreTrainedModel(PreTrainedModel):
-    config_class = DeepseekV2Config
+class CoePreTrainedModel(PreTrainedModel):
+    config_class = CoeConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["DeepseekV2DecoderLayer"]
+    _no_split_modules = ["CoeDecoderLayer"]
     _skip_keys_device_placement = "past_key_values"
     _supports_flash_attn_2 = True
     _supports_cache_class = True
@@ -1347,7 +1348,7 @@ class DeepseekV2PreTrainedModel(PreTrainedModel):
                 module.weight.data[module.padding_idx].zero_()
 
 
-DeepseekV2_INPUTS_DOCSTRING = r"""
+Coe_INPUTS_DOCSTRING = r"""
     Args:
         input_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`):
             Indices of input sequence tokens in the vocabulary. Padding will be ignored by default should you provide
@@ -1418,18 +1419,18 @@ DeepseekV2_INPUTS_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare DeepseekV2 Model outputting raw hidden-states without any specific head on top.",
-    DeepseekV2_START_DOCSTRING,
+    "The bare Coe Model outputting raw hidden-states without any specific head on top.",
+    Coe_START_DOCSTRING,
 )
-class DeepseekV2Model(DeepseekV2PreTrainedModel):
+class CoeModel(CoePreTrainedModel):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`DeepseekV2DecoderLayer`]
+    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`CoeDecoderLayer`]
 
     Args:
-        config: DeepseekV2Config
+        config: CoeConfig
     """
 
-    def __init__(self, config: DeepseekV2Config):
+    def __init__(self, config: CoeConfig):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -1439,12 +1440,12 @@ class DeepseekV2Model(DeepseekV2PreTrainedModel):
         )
         self.layers = nn.ModuleList(
             [
-                DeepseekV2DecoderLayer(config, layer_idx)
+                CoeDecoderLayer(config, layer_idx)
                 for layer_idx in range(config.num_hidden_layers)
             ]
         )
         self._use_flash_attention_2 = config._attn_implementation == "flash_attention_2"
-        self.norm = DeepseekV2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.norm = CoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
@@ -1456,7 +1457,7 @@ class DeepseekV2Model(DeepseekV2PreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    @add_start_docstrings_to_model_forward(DeepseekV2_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(Coe_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -1607,12 +1608,12 @@ class DeepseekV2Model(DeepseekV2PreTrainedModel):
         )
 
 
-class DeepseekV2ForCausalLM(DeepseekV2PreTrainedModel):
+class CoeForCausalLM(CoePreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
         super().__init__(config)
-        self.model = DeepseekV2Model(config)
+        self.model = CoeModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
@@ -1637,7 +1638,7 @@ class DeepseekV2ForCausalLM(DeepseekV2PreTrainedModel):
     def get_decoder(self):
         return self.model
 
-    @add_start_docstrings_to_model_forward(DeepseekV2_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(Coe_INPUTS_DOCSTRING)
     @replace_return_docstrings(
         output_type=CausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC
     )
@@ -1666,9 +1667,9 @@ class DeepseekV2ForCausalLM(DeepseekV2PreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import AutoTokenizer, DeepseekV2ForCausalLM
+        >>> from transformers import AutoTokenizer, CoeForCausalLM
 
-        >>> model = DeepseekV2ForCausalLM.from_pretrained(PATH_TO_CONVERTED_WEIGHTS)
+        >>> model = CoeForCausalLM.from_pretrained(PATH_TO_CONVERTED_WEIGHTS)
         >>> tokenizer = AutoTokenizer.from_pretrained(PATH_TO_CONVERTED_TOKENIZER)
 
         >>> prompt = "Hey, are you conscious? Can you talk to me?"
@@ -1814,9 +1815,9 @@ class DeepseekV2ForCausalLM(DeepseekV2PreTrainedModel):
 
 @add_start_docstrings(
     """
-    The DeepseekV2 Model transformer with a sequence classification head on top (linear layer).
+    The Coe Model transformer with a sequence classification head on top (linear layer).
 
-    [`DeepseekV2ForSequenceClassification`] uses the last token in order to do the classification, as other causal models
+    [`CoeForSequenceClassification`] uses the last token in order to do the classification, as other causal models
     (e.g. GPT-2) do.
 
     Since it does classification on the last token, it requires to know the position of the last token. If a
@@ -1825,13 +1826,13 @@ class DeepseekV2ForCausalLM(DeepseekV2PreTrainedModel):
     padding tokens when `inputs_embeds` are passed instead of `input_ids`, it does the same (take the last value in
     each row of the batch).
     """,
-    DeepseekV2_START_DOCSTRING,
+    Coe_START_DOCSTRING,
 )
-class DeepseekV2ForSequenceClassification(DeepseekV2PreTrainedModel):
+class CoeForSequenceClassification(CoePreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.model = DeepseekV2Model(config)
+        self.model = CoeModel(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 
         # Initialize weights and apply final processing
@@ -1843,7 +1844,7 @@ class DeepseekV2ForSequenceClassification(DeepseekV2PreTrainedModel):
     def set_input_embeddings(self, value):
         self.model.embed_tokens = value
 
-    @add_start_docstrings_to_model_forward(DeepseekV2_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(Coe_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
