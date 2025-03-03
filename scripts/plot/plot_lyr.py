@@ -58,7 +58,7 @@ ax1.set_title('Performance Comparison', fontweight='bold', fontsize=16)
 ax1.legend(frameon=True, fontsize=12, framealpha=0.7, edgecolor='#333333', loc='upper right')
 ax1.grid(True, which='minor', linestyle=':', alpha=0.4)
 ax1.grid(True, which='major', linestyle='-', alpha=0.5)
-ax1.set_xlim(400, 1000)
+ax1.set_xlim(370, 1000)
 ax1.set_ylim(1, 2)
 ax1.set_facecolor('#f8f9fa')
 

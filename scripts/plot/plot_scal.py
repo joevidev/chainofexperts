@@ -23,7 +23,7 @@ columns = ['64ept-8tpk-2itr', '64ept-8tpk-1itr', '64ept-16tpk-1itr', '64ept-24tp
 labels = ['CoE-2(8/64)', 'MoE(8/64)', 'MoE(16/64)', 'MoE(24/64)']
 
 # Plot with better aesthetics
-plt.figure(figsize=(12*0.85, 7*0.85))
+plt.figure(figsize=(12*0.7, 7*0.7))
 
 # Find the index where steps >= 100
 start_idx = np.where(steps >= 100)[0]
@@ -62,7 +62,7 @@ plt.grid(True, which='major', linestyle='-', alpha=0.5)
 # No annotation
 
 # Adjust axis limits to focus on the important part
-plt.xlim(400, 1000)
+plt.xlim(370, 1000)
 plt.ylim(1, 2)
 
 # Add a subtle background color
