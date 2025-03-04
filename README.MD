@@ -203,14 +203,10 @@ This repository is based on our research on Chain-of-Experts (CoE). For more tec
 
 # Contributors
 
-Zihan Wang*
-
-Rui Pan*
-
-Lu Yin*
-
-Manling Li*
-
-Shiwei Liu*
+[Zihan Wang*](https://zihanwang314.github.io/)
+[Rui Pan*](https://research4pan.github.io/)
+[Lu Yin*](https://luuyin.com/)
+[Manling Li*](https://limanling.github.io/)
+[Shiwei Liu*](https://shiweiliuiiiiiii.github.io/)
 
 *Equal contribution. ZW and SL initiated the project. LY explored MoE internal processing mechanisms. ZW proposed the sequential expert and CoE concepts, implemented the code, and conducted experiments. SL proposed the independent gating mechanism. RP explored inter-layer importance and contributed to the dataset. ML provided experimental guidance and cloud computing services. ZW and ML prepared the report and visualization materials.
