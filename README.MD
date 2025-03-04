@@ -55,9 +55,9 @@ Our experimental method is named as ${\rm\{CoE/MoE\}}-C(K/N)$, for example, **Co
 
 ### Performance Advantages:
 
-#### With identical compute and memory budgets, CoE clearly outperforms traditional approaches.
+#### With similar compute and memory budgets, CoE clearly outperforms traditional approaches.
 
-In pretraining on Math tasks (1000 steps), CoE-2(4/64) significantly outperforms MoE(8/64), **reducing loss from 1.20 to 1.12 with a steeper downward trend with the same compute and memory budget.** 
+In pretraining on Math tasks (1000 steps), CoE-2(4/64) significantly outperforms MoE(8/64), **reducing loss from 1.20 to 1.12 with a steeper downward trend with similar compute and memory budget.** 
 
 ![image.png](scripts/plot/plot.png)
 
@@ -75,7 +75,7 @@ To run this experiment, please uncomment the following lines in `runs/run.sh`:
 
 ### Resource Efficiency
 
-#### 1. With the same computation, CoE reduces memory requirements.
+#### 1. With similar computation, CoE reduces memory requirements.
 
 As shown below, CoE-2(4/48) achieves performance similar to MoE(8/64) but uses fewer total experts. **Under matched loss conditions, memory requirements are reduced by 18%.**
 
@@ -90,7 +90,7 @@ To run this experiment, please uncomment the following lines in `runs/run.sh`:
 
 (note: we recorded the GPU memory allocated, related to the theoretical minimum memory with micro_bsz=1; in practice, memory usage is higher due to the large batch size used in experiments)
 
-#### 2. With the same budget, CoE serves as a better scaling approach.
+#### 2. With similar budget, CoE serves as a better scaling approach.
 
 **We compared CoE with other computational scaling methods: expanding model layers and expanding expert selection count.**
 
@@ -125,7 +125,7 @@ To run this experiment, please uncomment the following lines in `runs/run.sh`:
 
 **a. Independent gating mechanism**
 
-Independent gating mechanisms can enhance model performance and to some extent explain expert specialization, indicating that the same expert processes different types of information at different iteration stages.
+Independent gating mechanisms can enhance model performance and to some extent explain expert specialization, indicating that similar expert processes different types of information at different iteration stages.
 
 We implemented a CoE variant with shared gating. We found performance worse than CoE and even worse than non-scaled MoE, as shown in the figure, demonstrating the effectiveness of the independent gating mechanism.
 
@@ -149,7 +149,7 @@ Perhaps most significantly, CoE provides what we call a "free lunch" acceleratio
 
 1. Increased freedom in expert choices. $C(64,4)^2 / C(64,8) ≈ 823$, more possible combinations
 2. CoE may unify the concept of **sequential processing** and **expert communication**:
-**a.** Different experts can process **sequentially**, increasing Transformer's effective depth. When multiple forward passes sent tokens to different experts, it enhances experts' sequential characteristics - the number of experts to process a token is the same, but in a serialized manner.
+**a.** Different experts can process **sequentially**, increasing Transformer's effective depth. When multiple forward passes sent tokens to different experts, it enhances experts' sequential characteristics - the number of routed experts to process a token is the same, but in a serialized manner.
 **b. One expert** has the opportunity to process a token **multiple times** during iteration, potentially helping to promote expert specialization: an expert could provide supplementary processing of a token after collaborative processing with other experts.
 
 ### Experimental Details
