@@ -8,3 +8,8 @@ __pycache__/
 *$py.class
 
 data
+
+# Poetry
+.venv/
+dist/
+poetry.lock
